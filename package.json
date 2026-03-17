@@ -1,0 +1,30 @@
+{
+  "name": "workflow-automation-platform",
+  "version": "1.0.0",
+  "description": "Enterprise workflow automation platform powered by agentic AI",
+  "main": "index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jomael-gemota/workflow-automation-platform.git"
+  },
+  "author": "Jomael Gemota",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/jomael-gemota/workflow-automation-platform/issues"
+  },
+  "homepage": "https://github.com/jomael-gemota/workflow-automation-platform#readme",
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "openai": "^6.31.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0"
+  }
+}
