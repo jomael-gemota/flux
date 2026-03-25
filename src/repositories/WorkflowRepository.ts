@@ -29,14 +29,18 @@ export class WorkflowRepository {
         const existing = await WorkflowModel.findOne({ workflowId: id });
         if (!existing) return null;
 
+        // Use toObject() to get a guaranteed plain POJO from the Mongoose Mixed field,
+        // avoiding any potential Mongoose document proxy quirks when spreading.
+        const existingDef = existing.toObject().definition as WorkflowDefinition;
+
         await WorkflowVersionModel.create({
             workflowId: id,
             version: existing.version,
-            definition: existing.definition,
+            definition: existingDef,
         });
 
         const updated: WorkflowDefinition = {
-            ...existing.definition,
+            ...existingDef,
             ...updates,
             id,
             version: existing.version + 1,

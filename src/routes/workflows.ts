@@ -33,7 +33,7 @@ export async function workflowRoutes(
                 version: 1,
             };
 
-            const { workflow: created, webhookSecret } = workflowRepo.create(workflow);
+            const { workflow: created, webhookSecret } = await workflowRepo.create(workflow);
 
             return reply.code(201).send({
                 ...created,
@@ -51,7 +51,7 @@ export async function workflowRoutes(
         },
         async (request, reply) => {
             const body = UpdateWorkflowSchema.parse(request.body);
-            const updated = workflowRepo.update(request.params.id, body);
+            const updated = await workflowRepo.update(request.params.id, body);
 
             if (!updated) throw NotFoundError(`Workflow ${request.params.id}`);
             return reply.code(200).send(updated);
@@ -62,7 +62,7 @@ export async function workflowRoutes(
         '/workflows/:id',
         { preHandler: apiKeyAuth },
         async (request, reply) => {
-            const deleted = workflowRepo.delete(request.params.id);
+            const deleted = await workflowRepo.delete(request.params.id);
             if (!deleted) throw NotFoundError(`Workflow ${request.params.id}`);
             return reply.code(200).send({ deleted: true, id: request.params.id });
         }
@@ -76,7 +76,7 @@ export async function workflowRoutes(
         },
         async (request, reply) => {
             const query = CursorPaginationSchema.parse(request.query);
-            const result = workflowRepo.findAll(query.limit, query.cursor ?? undefined);
+            const result = await workflowRepo.findAll(query.limit, query.cursor ?? undefined);
             return reply.code(200).send(result);
         }
     );
@@ -85,7 +85,7 @@ export async function workflowRoutes(
         '/workflows/:id',
         { preHandler: apiKeyAuth },
         async (request, reply) => {
-            const workflow = workflowRepo.findById(request.params.id);
+            const workflow = await workflowRepo.findById(request.params.id);
             if (!workflow) throw NotFoundError(`Workflow ${request.params.id}`);
             return reply.code(200).send(workflow);
         }

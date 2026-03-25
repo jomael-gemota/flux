@@ -18,11 +18,22 @@ export class ConditionEvaluator {
 
     private evaluateLeaf(condition: LeafCondition, context: ExecutionContext): boolean {
         const left = this.resolver.resolve(condition.left, context);
-        const right = condition.right;
+
+        // Also resolve the right side so {{nodes.x.y}} expressions work there too.
+        // Static values like "200" or "true" pass through resolve() unchanged.
+        const rawRight = condition.right !== undefined && condition.right !== null
+            ? condition.right
+            : undefined;
+        const right = rawRight !== undefined
+            ? this.resolver.resolve(String(rawRight), context)
+            : rawRight;
 
         switch (condition.operator) {
-        case 'eq':  return left === right;
-        case 'neq': return left !== right;
+        // Use loose equality so number 42 == string "42" (common when comparing
+        // a resolved numeric value against a user-typed comparison string).
+        case 'eq':  return this.looseEqual(left, right);
+        case 'neq': return !this.looseEqual(left, right);
+
         case 'gt':  return this.toNumber(left) > this.toNumber(right);
         case 'gte': return this.toNumber(left) >= this.toNumber(right);
         case 'lt':  return this.toNumber(left) < this.toNumber(right);
@@ -38,6 +49,19 @@ export class ConditionEvaluator {
         default:
             throw new Error(`Unknown operator: ${condition.operator}`);
         }
+    }
+
+    // Equality that bridges the number/string gap produced by user-typed comparison
+    // values: resolved number 42 should equal typed string "42".
+    private looseEqual(a: unknown, b: unknown): boolean {
+        if (a === b) return true;
+        if (a == null || b == null) return false;
+        // If either side is already a number, compare numerically when both are numeric
+        if (typeof a === 'number' || typeof b === 'number') {
+            const na = Number(a), nb = Number(b);
+            if (!isNaN(na) && !isNaN(nb)) return na === nb;
+        }
+        return String(a) === String(b);
     }
 
     private evaluateGroup(condition: GroupCondition, context: ExecutionContext): boolean {

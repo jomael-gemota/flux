@@ -52,6 +52,51 @@ describe('ExpressionResolver', () => {
         });
     });
 
+    describe('{{...}} wrapper stripping', () => {
+        it('resolves expression wrapped in {{ }}', () => {
+            const ctx = makeContext({ 'node-1': { status: 200 } });
+            expect(resolver.resolve('{{nodes.node-1.status}}', ctx)).toBe(200);
+        });
+
+        it('handles whitespace inside {{ }}', () => {
+            const ctx = makeContext({ 'node-1': { status: 200 } });
+            expect(resolver.resolve('{{ nodes.node-1.status }}', ctx)).toBe(200);
+        });
+
+        it('returns plain string wrapped in {{ }} that is not an expression', () => {
+            const ctx = makeContext({});
+            expect(resolver.resolve('{{hello}}', ctx)).toBe('hello');
+        });
+    });
+
+    describe('array indexing', () => {
+        it('resolves body[0] bracket notation on a property', () => {
+            const ctx = makeContext({ 'n1': { body: [42, 99] } });
+            expect(resolver.resolve('nodes.n1.body[0]', ctx)).toBe(42);
+        });
+
+        it('resolves second element body[1]', () => {
+            const ctx = makeContext({ 'n1': { body: [42, 99] } });
+            expect(resolver.resolve('nodes.n1.body[1]', ctx)).toBe(99);
+        });
+
+        it('resolves {{nodes.n1.body[0]}} (wrapper + array index)', () => {
+            const ctx = makeContext({ 'n1': { body: [7] } });
+            expect(resolver.resolve('{{nodes.n1.body[0]}}', ctx)).toBe(7);
+        });
+
+        it('returns undefined for out-of-bounds index', () => {
+            const ctx = makeContext({ 'n1': { body: [1] } });
+            expect(resolver.resolve('nodes.n1.body[5]', ctx)).toBeUndefined();
+        });
+
+        it('throws when property is not an array', () => {
+            const ctx = makeContext({ 'n1': { body: { nested: true } } });
+            expect(() => resolver.resolve('nodes.n1.body[0]', ctx))
+                .toThrow('"body" is not an array');
+        });
+    });
+
     describe('resolveTemplate', () => {
         it('replaces {{ }} placeholders', () => {
             const ctx = makeContext({ 'node-1': { name: 'world' } });

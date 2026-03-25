@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { apiKeyAuth } from '../middleware/auth';
 import { ExecutionRepository } from '../repositories/ExecutionRepository';
 import { WorkflowService } from '../services/WorkflowService';
-import { CursorPaginationSchema } from '../validation/schemas';
+import { ExecutionQuerySchema } from '../validation/schemas';
 import { toJsonSchema } from '../validation/toJsonSchema';
 import { NotFoundError } from '../errors/ApiError';
 
@@ -25,15 +25,14 @@ export async function executionRoutes(
         }
     );
 
-    fastify.get<{ Querystring: { workflowId?: string; limit?: number; cursor?: string } }>(
+    fastify.get<{ Querystring: { workflowId: string; limit?: number; cursor?: string } }>(
         '/executions',
         {
             preHandler: apiKeyAuth,
-            schema: { querystring: toJsonSchema(CursorPaginationSchema) },
+            schema: { querystring: toJsonSchema(ExecutionQuerySchema) },
         },
         async (request, reply) => {
             const { workflowId, limit = 20, cursor } = request.query;
-            if (!workflowId) throw NotFoundError('workflowId query param is required');
 
             const result = await executionRepo.findByWorkflowIdPaginated(
                 workflowId,

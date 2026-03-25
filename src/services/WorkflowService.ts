@@ -31,16 +31,46 @@ export class WorkflowService {
             triggeredBy
         );
 
-        const queue = getWorkflowQueue();
-        await queue.add('run', { executionId, workflowId, input, triggeredBy });
+        // When Redis is reachable, enqueue for async processing by the worker.
+        // Fall back to synchronous in-process execution if Redis is not configured
+        // or the connection fails, so the platform works without a Redis dependency.
+        if (process.env.REDIS_URL) {
+            try {
+                const queue = getWorkflowQueue();
+                await queue.add('run', { executionId, workflowId, input, triggeredBy });
+
+                return {
+                    executionId,
+                    workflowId,
+                    status: 'pending' as const,
+                    startedAt,
+                    completedAt: startedAt,
+                    results: [],
+                };
+            } catch (redisErr) {
+                console.warn('⚠️  Redis unavailable, falling back to synchronous execution:', (redisErr as Error).message);
+            }
+        }
+
+        // Synchronous fallback
+        await this.executionRepo.markRunning(executionId);
+        const result = await this.runner.run(workflow, input);
+        const completedAt = new Date();
+
+        const hasFailure = result.results.some(r => r.status === 'failure');
+        const hasSuccess = result.results.some(r => r.status === 'success');
+        const finalStatus: 'success' | 'partial' | 'failure' =
+            hasFailure && hasSuccess ? 'partial' : hasFailure ? 'failure' : 'success';
+
+        await this.executionRepo.complete(executionId, finalStatus, result.results);
 
         return {
             executionId,
             workflowId,
-            status: 'pending' as const,
+            status: finalStatus,
             startedAt,
-            completedAt: startedAt,
-            results: [],
+            completedAt,
+            results: result.results,
         };
     }
 

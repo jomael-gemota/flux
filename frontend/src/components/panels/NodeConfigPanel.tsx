@@ -1,0 +1,884 @@
+import { Settings2, Star, Braces } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { useWorkflowStore } from '../../store/workflowStore';
+import type { CanvasNode } from '../../store/workflowStore';
+import { Select } from '../ui/Input';
+
+// ── Output field catalogue (human-friendly labels for each node type) ─────────
+
+interface OutputField {
+  key: string;
+  label: string;
+}
+
+const NODE_OUTPUT_FIELDS: Record<string, OutputField[]> = {
+  trigger: [
+    { key: 'payload', label: 'Trigger payload (full input)' },
+  ],
+  http: [
+    { key: 'status', label: 'HTTP status code' },
+    { key: 'body', label: 'Full response body (JSON)' },
+    { key: 'headers', label: 'Response headers' },
+  ],
+  llm: [
+    { key: 'content', label: 'AI response text' },
+    { key: 'model', label: 'Model used' },
+    { key: 'usage.totalTokens', label: 'Total tokens used' },
+    { key: 'usage.promptTokens', label: 'Prompt tokens' },
+    { key: 'usage.completionTokens', label: 'Completion tokens' },
+  ],
+  condition: [
+    { key: 'result', label: 'Condition result (true / false)' },
+    { key: 'nextNodeId', label: 'Next node ID' },
+  ],
+  switch: [
+    { key: 'matchedCase', label: 'Matched case label' },
+    { key: 'nextNodeId', label: 'Next node ID' },
+  ],
+  transform: [
+    { key: '…', label: 'Use the key names you defined in Mappings' },
+  ],
+  output: [
+    { key: 'value', label: 'Resolved output value' },
+  ],
+};
+
+// ── Variable picker panel ─────────────────────────────────────────────────────
+
+function VariablePickerPanel({
+  nodes,
+  onInsert,
+}: {
+  nodes: CanvasNode[];
+  onInsert: (expression: string) => void;
+}) {
+  if (nodes.length === 0) return null;
+
+  return (
+    <div className="mt-1 bg-slate-850 border border-blue-800/50 rounded-md overflow-hidden shadow-lg">
+      <div className="bg-slate-800 px-2.5 py-1.5 border-b border-slate-700">
+        <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider">
+          Click a field to insert it
+        </p>
+        <p className="text-[10px] text-slate-500 mt-0.5">
+          The expression will be placed at your cursor position.
+        </p>
+      </div>
+
+      <div className="max-h-52 overflow-y-auto">
+        {nodes.map((n) => {
+          const fields = NODE_OUTPUT_FIELDS[n.data.nodeType] ?? [];
+          const isTransform = n.data.nodeType === 'transform';
+
+          return (
+            <div key={n.id} className="px-2.5 py-2 border-b border-slate-800/60 last:border-0">
+              {/* Node header */}
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                    n.data.nodeType === 'http' ? 'bg-blue-400' :
+                    n.data.nodeType === 'llm' ? 'bg-emerald-400' :
+                    n.data.nodeType === 'trigger' ? 'bg-violet-400' :
+                    n.data.nodeType === 'transform' ? 'bg-cyan-400' :
+                    n.data.nodeType === 'condition' ? 'bg-amber-400' :
+                    n.data.nodeType === 'switch' ? 'bg-orange-400' :
+                    'bg-rose-400'
+                  }`}
+                />
+                <span className="text-[11px] font-semibold text-white truncate">
+                  {n.data.label}
+                </span>
+                <span className="text-[9px] text-slate-500 shrink-0">
+                  {n.data.nodeType}
+                </span>
+              </div>
+
+              {/* Field chips */}
+              <div className="flex flex-wrap gap-1">
+                {isTransform ? (
+                  // Transform: only show whole-node reference + note
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onInsert(`{{nodes.${n.id}.YOUR_KEY}}`)}
+                      className="inline-flex items-center gap-1 text-[10px] bg-slate-700 hover:bg-blue-700 text-emerald-300 hover:text-white rounded px-1.5 py-0.5 font-mono transition-colors cursor-pointer"
+                      title="Replace YOUR_KEY with one of your mapped output key names"
+                    >
+                      .YOUR_KEY
+                    </button>
+                    <span className="text-[10px] text-slate-500 self-center">
+                      ← replace with your mapping key
+                    </span>
+                  </>
+                ) : fields.length === 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => onInsert(`{{nodes.${n.id}}}`)}
+                    className="inline-flex items-center gap-1 text-[10px] bg-slate-700 hover:bg-blue-700 text-emerald-300 hover:text-white rounded px-1.5 py-0.5 font-mono transition-colors cursor-pointer"
+                  >
+                    {`{{nodes.${n.id}}}`}
+                  </button>
+                ) : (
+                  fields.map((f) => (
+                    <button
+                      key={f.key}
+                      type="button"
+                      onClick={() =>
+                        f.key === '…'
+                          ? undefined
+                          : onInsert(`{{nodes.${n.id}.${f.key}}}`)
+                      }
+                      title={`Inserts: {{nodes.${n.id}.${f.key}}}`}
+                      className={`inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 transition-colors ${
+                        f.key === '…'
+                          ? 'text-slate-500 cursor-default'
+                          : 'bg-slate-700 hover:bg-blue-700 text-emerald-300 hover:text-white font-mono cursor-pointer'
+                      }`}
+                    >
+                      {f.key !== '…' && (
+                        <span className="font-mono">.{f.key}</span>
+                      )}
+                      <span className={f.key !== '…' ? 'text-slate-400 group-hover:text-slate-200 font-sans' : ''}>
+                        {f.label}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Helper: insert text at cursor in a controlled field ───────────────────────
+
+function insertAtCursor(
+  el: HTMLTextAreaElement | HTMLInputElement,
+  text: string,
+  currentValue: string,
+  onChange: (v: string) => void
+) {
+  const start = el.selectionStart ?? currentValue.length;
+  const end = el.selectionEnd ?? currentValue.length;
+  const next = currentValue.slice(0, start) + text + currentValue.slice(end);
+  onChange(next);
+  // Restore cursor after React batches the state update
+  requestAnimationFrame(() => {
+    el.selectionStart = start + text.length;
+    el.selectionEnd = start + text.length;
+    el.focus();
+  });
+}
+
+// ── ExpressionTextArea ────────────────────────────────────────────────────────
+
+function ExpressionTextArea({
+  label,
+  value,
+  rows = 3,
+  placeholder,
+  onChange,
+  nodes,
+}: {
+  label: string;
+  value: string;
+  rows?: number;
+  placeholder?: string;
+  onChange: (v: string) => void;
+  nodes: CanvasNode[];
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  function handleInsert(expr: string) {
+    if (ref.current) {
+      insertAtCursor(ref.current, expr, value, onChange);
+    } else {
+      onChange(value + expr);
+    }
+    setOpen(false);
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-1">
+        <label className="block text-xs font-medium text-slate-400">{label}</label>
+        {nodes.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setOpen((p) => !p)}
+            title="Insert a variable from another node"
+            className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded transition-colors shrink-0 ${
+              open
+                ? 'bg-blue-600 text-white'
+                : 'text-blue-400 hover:text-white hover:bg-slate-700'
+            }`}
+          >
+            <Braces className="w-2.5 h-2.5" />
+            Insert variable
+          </button>
+        )}
+      </div>
+      <textarea
+        ref={ref}
+        rows={rows}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none"
+      />
+      {open && <VariablePickerPanel nodes={nodes} onInsert={handleInsert} />}
+    </div>
+  );
+}
+
+// ── ExpressionInput ───────────────────────────────────────────────────────────
+
+function ExpressionInput({
+  label,
+  value,
+  placeholder,
+  onChange,
+  nodes,
+  hint,
+}: {
+  label?: string;
+  value: string;
+  placeholder?: string;
+  onChange: (v: string) => void;
+  nodes: CanvasNode[];
+  hint?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+
+  function handleInsert(expr: string) {
+    if (ref.current) {
+      insertAtCursor(ref.current, expr, value, onChange);
+    } else {
+      onChange(value + expr);
+    }
+    setOpen(false);
+  }
+
+  return (
+    <div className="space-y-1">
+      {(label || nodes.length > 0) && (
+        <div className="flex items-center justify-between gap-1">
+          {label && (
+            <label className="block text-xs font-medium text-slate-400">{label}</label>
+          )}
+          {nodes.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setOpen((p) => !p)}
+              title="Insert a variable from another node"
+              className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded transition-colors shrink-0 ${
+                open
+                  ? 'bg-blue-600 text-white'
+                  : 'text-blue-400 hover:text-white hover:bg-slate-700'
+              }`}
+            >
+              <Braces className="w-2.5 h-2.5" />
+              Insert variable
+            </button>
+          )}
+        </div>
+      )}
+      <input
+        ref={ref}
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+      />
+      {hint && <p className="text-slate-500 text-[10px]">{hint}</p>}
+      {open && <VariablePickerPanel nodes={nodes} onInsert={handleInsert} />}
+    </div>
+  );
+}
+
+// ── Main panel ────────────────────────────────────────────────────────────────
+
+export function NodeConfigPanel() {
+  const { nodes, selectedNodeId, setNodes, activeWorkflow, setActiveWorkflow } =
+    useWorkflowStore();
+
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId);
+
+  if (!selectedNode) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-2 px-4 text-center">
+        <Settings2 className="w-8 h-8" />
+        <p className="text-xs">Click a node to edit its configuration</p>
+      </div>
+    );
+  }
+
+  const { data } = selectedNode;
+  const nodeType = data.nodeType as string;
+
+  function updateConfig(patch: Record<string, unknown>) {
+    const updated = nodes.map((n) =>
+      n.id === selectedNodeId
+        ? { ...n, data: { ...n.data, config: { ...n.data.config, ...patch } } }
+        : n
+    );
+    setNodes(updated);
+  }
+
+  function updateData(patch: Partial<typeof data>) {
+    const updated = nodes.map((n) =>
+      n.id === selectedNodeId ? { ...n, data: { ...n.data, ...patch } } : n
+    );
+    setNodes(updated);
+  }
+
+  function setAsEntry() {
+    const updated = nodes.map((n) => ({
+      ...n,
+      data: { ...n.data, isEntry: n.id === selectedNodeId },
+    }));
+    setNodes(updated);
+    if (activeWorkflow) {
+      setActiveWorkflow({ ...activeWorkflow, entryNodeId: selectedNodeId! });
+    }
+  }
+
+  const cfg = data.config as Record<string, unknown>;
+  const otherNodes = nodes.filter((n) => n.id !== selectedNodeId);
+
+  return (
+    <div className="p-4 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider">{nodeType}</p>
+          <p className="text-sm font-semibold text-white truncate">{data.label}</p>
+        </div>
+        {!data.isEntry && (
+          <button
+            onClick={setAsEntry}
+            className="text-slate-500 hover:text-amber-400 transition-colors"
+            title="Set as entry node"
+          >
+            <Star className="w-4 h-4" />
+          </button>
+        )}
+        {data.isEntry && <Star className="w-4 h-4 text-amber-400 fill-amber-400" />}
+      </div>
+
+      {/* Name */}
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-400">Node name</label>
+        <input
+          type="text"
+          value={data.label}
+          onChange={(e) => updateData({ label: e.target.value })}
+          className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+        />
+      </div>
+
+      <div className="border-t border-slate-700" />
+
+      {/* Type-specific config */}
+      {nodeType === 'http' && (
+        <HttpConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} />
+      )}
+      {nodeType === 'llm' && (
+        <LLMConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} />
+      )}
+      {nodeType === 'condition' && (
+        <ConditionConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} />
+      )}
+      {nodeType === 'switch' && (
+        <SwitchConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} />
+      )}
+      {nodeType === 'transform' && (
+        <TransformConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} />
+      )}
+      {nodeType === 'output' && (
+        <OutputConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} />
+      )}
+
+      {/* Shared: retry / timeout */}
+      <div className="border-t border-slate-700" />
+      <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
+        Retry & Timeout
+      </p>
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-400">Retries (0–5)</label>
+        <input
+          type="number"
+          min={0}
+          max={5}
+          value={String(data.retries ?? 0)}
+          onChange={(e) => updateData({ retries: Number(e.target.value) })}
+          className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-400">Retry delay (ms)</label>
+        <input
+          type="number"
+          min={0}
+          value={String(data.retryDelayMs ?? 0)}
+          onChange={(e) => updateData({ retryDelayMs: Number(e.target.value) })}
+          className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-400">Timeout (ms, 0 = none)</label>
+        <input
+          type="number"
+          min={0}
+          value={String(data.timeoutMs ?? 0)}
+          onChange={(e) =>
+            updateData({ timeoutMs: Number(e.target.value) || undefined })
+          }
+          className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── Per-type config forms ─────────────────────────────────────────────────────
+
+function HttpConfig({
+  cfg,
+  onChange,
+  otherNodes,
+}: {
+  cfg: Record<string, unknown>;
+  onChange: (p: Record<string, unknown>) => void;
+  otherNodes: CanvasNode[];
+}) {
+  return (
+    <>
+      <Select
+        label="Method"
+        value={String(cfg.method ?? 'GET')}
+        onChange={(e) => onChange({ method: e.target.value })}
+        options={['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => ({
+          value: m,
+          label: m,
+        }))}
+      />
+      <ExpressionInput
+        label="URL"
+        value={String(cfg.url ?? '')}
+        onChange={(v) => onChange({ url: v })}
+        placeholder="https://api.example.com/data"
+        nodes={otherNodes}
+      />
+      <ExpressionTextArea
+        label="Body (JSON)"
+        rows={3}
+        value={cfg.body ? JSON.stringify(cfg.body, null, 2) : ''}
+        onChange={(v) => {
+          try {
+            onChange({ body: JSON.parse(v) });
+          } catch {
+            onChange({ body: v });
+          }
+        }}
+        placeholder='{"key": "value"}'
+        nodes={otherNodes}
+      />
+    </>
+  );
+}
+
+function LLMConfig({
+  cfg,
+  onChange,
+  otherNodes,
+}: {
+  cfg: Record<string, unknown>;
+  onChange: (p: Record<string, unknown>) => void;
+  otherNodes: CanvasNode[];
+}) {
+  return (
+    <>
+      <Select
+        label="Provider"
+        value={String(cfg.provider ?? 'openai')}
+        onChange={(e) => onChange({ provider: e.target.value })}
+        options={[
+          { value: 'openai', label: 'OpenAI' },
+          { value: 'anthropic', label: 'Anthropic' },
+        ]}
+      />
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-400">Model</label>
+        <input
+          type="text"
+          value={String(cfg.model ?? '')}
+          onChange={(e) => onChange({ model: e.target.value })}
+          placeholder="gpt-4o-mini"
+          className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-400">Temperature (0–2)</label>
+        <input
+          type="number"
+          min={0}
+          max={2}
+          step={0.1}
+          value={String(cfg.temperature ?? 0.7)}
+          onChange={(e) => onChange({ temperature: parseFloat(e.target.value) })}
+          className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-400">Max tokens</label>
+        <input
+          type="number"
+          min={1}
+          value={String(cfg.maxTokens ?? 500)}
+          onChange={(e) => onChange({ maxTokens: Number(e.target.value) })}
+          className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+        />
+      </div>
+      <ExpressionTextArea
+        label="System prompt"
+        rows={2}
+        value={String(cfg.systemPrompt ?? '')}
+        onChange={(v) => onChange({ systemPrompt: v })}
+        placeholder="You are a helpful assistant..."
+        nodes={otherNodes}
+      />
+      <ExpressionTextArea
+        label="User prompt"
+        rows={3}
+        value={String(cfg.userPrompt ?? '')}
+        onChange={(v) => onChange({ userPrompt: v })}
+        placeholder="Summarize the following content…"
+        nodes={otherNodes}
+      />
+    </>
+  );
+}
+
+function ConditionConfig({
+  cfg,
+  onChange,
+  otherNodes,
+}: {
+  cfg: Record<string, unknown>;
+  onChange: (p: Record<string, unknown>) => void;
+  otherNodes: CanvasNode[];
+}) {
+  const condition = (cfg.condition as Record<string, unknown>) ?? {};
+  function updateCond(patch: Record<string, unknown>) {
+    onChange({ condition: { ...condition, ...patch } });
+  }
+  return (
+    <>
+      <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
+        Condition
+      </p>
+      <ExpressionInput
+        label="Left side (what to check)"
+        value={String(condition.left ?? '')}
+        onChange={(v) => updateCond({ left: v })}
+        placeholder="Pick a variable → e.g. HTTP status code"
+        nodes={otherNodes}
+      />
+      <Select
+        label="Operator"
+        value={String(condition.operator ?? 'eq')}
+        onChange={(e) => updateCond({ operator: e.target.value })}
+        options={[
+          { value: 'eq', label: 'equals (=)' },
+          { value: 'neq', label: 'not equals (≠)' },
+          { value: 'gt', label: 'greater than (>)' },
+          { value: 'gte', label: 'greater or equal (≥)' },
+          { value: 'lt', label: 'less than (<)' },
+          { value: 'lte', label: 'less or equal (≤)' },
+          { value: 'contains', label: 'contains' },
+          { value: 'startsWith', label: 'starts with' },
+          { value: 'endsWith', label: 'ends with' },
+          { value: 'isNull', label: 'is empty / null' },
+          { value: 'isNotNull', label: 'is not empty / null' },
+        ]}
+      />
+      <ExpressionInput
+        label="Right side (value to compare)"
+        value={String(condition.right ?? '')}
+        onChange={(v) => updateCond({ right: v })}
+        placeholder="200"
+        nodes={otherNodes}
+      />
+      <p className="text-[10px] text-slate-500 mt-1">
+        Connect the <strong className="text-amber-400">true</strong> and{' '}
+        <strong className="text-amber-400">false</strong> handles on the canvas to set routing.
+      </p>
+    </>
+  );
+}
+
+function SwitchConfig({
+  cfg,
+  onChange,
+  otherNodes,
+}: {
+  cfg: Record<string, unknown>;
+  onChange: (p: Record<string, unknown>) => void;
+  otherNodes: CanvasNode[];
+}) {
+  const cases = (cfg.cases as Array<Record<string, unknown>>) ?? [];
+
+  function updateCase(i: number, patch: Record<string, unknown>) {
+    const updated = cases.map((c, idx) => (idx === i ? { ...c, ...patch } : c));
+    onChange({ cases: updated });
+  }
+
+  function addCase() {
+    onChange({
+      cases: [
+        ...cases,
+        {
+          label: `Case ${cases.length + 1}`,
+          condition: { type: 'leaf', left: '', operator: 'eq', right: '' },
+          next: '',
+        },
+      ],
+    });
+  }
+
+  function removeCase(i: number) {
+    onChange({ cases: cases.filter((_, idx) => idx !== i) });
+  }
+
+  return (
+    <>
+      {cases.map((c, i) => {
+        const cond = (c.condition as Record<string, unknown>) ?? {};
+        return (
+          <div key={i} className="bg-slate-800 rounded-md p-2 space-y-2">
+            <div className="flex items-center justify-between gap-1">
+              <input
+                className="flex-1 min-w-0 bg-slate-700 border border-slate-600 text-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                value={String(c.label ?? `Case ${i + 1}`)}
+                onChange={(e) => updateCase(i, { label: e.target.value })}
+                placeholder="Case label"
+              />
+              <button
+                onClick={() => removeCase(i)}
+                className="text-slate-500 hover:text-red-400 ml-1 shrink-0 text-sm leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <ExpressionInput
+              label="Check this value"
+              value={String(cond.left ?? '')}
+              onChange={(v) =>
+                updateCase(i, { condition: { ...cond, left: v } })
+              }
+              placeholder="Pick a variable to check"
+              nodes={otherNodes}
+            />
+            <Select
+              label="Operator"
+              value={String(cond.operator ?? 'eq')}
+              onChange={(e) =>
+                updateCase(i, { condition: { ...cond, operator: e.target.value } })
+              }
+              options={[
+                { value: 'eq', label: 'equals (=)' },
+                { value: 'neq', label: 'not equals (≠)' },
+                { value: 'gt', label: 'greater than (>)' },
+                { value: 'lt', label: 'less than (<)' },
+                { value: 'contains', label: 'contains' },
+              ]}
+            />
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-slate-400">Compare to</label>
+              <input
+                className="w-full bg-slate-700 border border-slate-600 text-slate-200 rounded px-2 py-1 text-xs placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                value={String(cond.right ?? '')}
+                onChange={(e) =>
+                  updateCase(i, { condition: { ...cond, right: e.target.value } })
+                }
+                placeholder="e.g. 200"
+              />
+            </div>
+          </div>
+        );
+      })}
+      <button
+        onClick={addCase}
+        className="w-full text-xs text-slate-400 hover:text-white border border-dashed border-slate-600 hover:border-slate-400 rounded-md py-1.5 transition-colors"
+      >
+        + Add case
+      </button>
+      <p className="text-[10px] text-slate-500">
+        Connect each case handle on the canvas to route to the target node.
+      </p>
+    </>
+  );
+}
+
+function TransformConfig({
+  cfg,
+  onChange,
+  otherNodes,
+}: {
+  cfg: Record<string, unknown>;
+  onChange: (p: Record<string, unknown>) => void;
+  otherNodes: CanvasNode[];
+}) {
+  const mappings = (cfg.mappings as Record<string, string>) ?? {};
+  const entries = Object.entries(mappings);
+
+  function updateKey(oldKey: string, newKey: string) {
+    const updated: Record<string, string> = {};
+    for (const [k, v] of Object.entries(mappings)) {
+      updated[k === oldKey ? newKey : k] = v;
+    }
+    onChange({ mappings: updated });
+  }
+
+  function addMapping() {
+    const key = `field${entries.length + 1}`;
+    onChange({ mappings: { ...mappings, [key]: '' } });
+  }
+
+  function removeMapping(key: string) {
+    const updated = { ...mappings };
+    delete updated[key];
+    onChange({ mappings: updated });
+  }
+
+  return (
+    <>
+      <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
+        Mappings
+      </p>
+      <p className="text-[10px] text-slate-500">
+        Left = output key name. Right = where the value comes from (use{' '}
+        <span className="text-blue-400">Insert variable</span> to pick from another node).
+      </p>
+      {entries.map(([k, v]) => (
+        <TransformMappingRow
+          key={k}
+          outputKey={k}
+          valueExpr={v}
+          nodes={otherNodes}
+          onKeyChange={(newKey) => updateKey(k, newKey)}
+          onValueChange={(newVal) =>
+            onChange({ mappings: { ...mappings, [k]: newVal } })
+          }
+          onRemove={() => removeMapping(k)}
+        />
+      ))}
+      <button
+        onClick={addMapping}
+        className="w-full text-xs text-slate-400 hover:text-white border border-dashed border-slate-600 hover:border-slate-400 rounded-md py-1.5 transition-colors"
+      >
+        + Add mapping
+      </button>
+    </>
+  );
+}
+
+function TransformMappingRow({
+  outputKey,
+  valueExpr,
+  nodes,
+  onKeyChange,
+  onValueChange,
+  onRemove,
+}: {
+  outputKey: string;
+  valueExpr: string;
+  nodes: CanvasNode[];
+  onKeyChange: (k: string) => void;
+  onValueChange: (v: string) => void;
+  onRemove: () => void;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const valueRef = useRef<HTMLInputElement>(null);
+
+  function handleInsert(expr: string) {
+    if (valueRef.current) {
+      insertAtCursor(valueRef.current, expr, valueExpr, onValueChange);
+    } else {
+      onValueChange(valueExpr + expr);
+    }
+    setPickerOpen(false);
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1">
+        <input
+          className="flex-1 min-w-0 bg-slate-800 border border-slate-600 text-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+          value={outputKey}
+          onChange={(e) => onKeyChange(e.target.value)}
+          placeholder="outputKey"
+        />
+        <span className="text-slate-600 text-xs shrink-0">←</span>
+        <input
+          ref={valueRef}
+          className="flex-1 min-w-0 bg-slate-800 border border-slate-600 text-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+          value={valueExpr}
+          onChange={(e) => onValueChange(e.target.value)}
+          placeholder="variable or static value"
+        />
+        {nodes.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setPickerOpen((p) => !p)}
+            title="Insert variable"
+            className={`shrink-0 p-1 rounded transition-colors ${
+              pickerOpen ? 'bg-blue-600 text-white' : 'text-blue-400 hover:text-white hover:bg-slate-700'
+            }`}
+          >
+            <Braces className="w-3 h-3" />
+          </button>
+        )}
+        <button
+          onClick={onRemove}
+          className="text-slate-500 hover:text-red-400 px-1 shrink-0 text-sm leading-none"
+        >
+          ×
+        </button>
+      </div>
+      {pickerOpen && (
+        <VariablePickerPanel nodes={nodes} onInsert={handleInsert} />
+      )}
+    </div>
+  );
+}
+
+function OutputConfig({
+  cfg,
+  onChange,
+  otherNodes,
+}: {
+  cfg: Record<string, unknown>;
+  onChange: (p: Record<string, unknown>) => void;
+  otherNodes: CanvasNode[];
+}) {
+  return (
+    <>
+      <ExpressionInput
+        label="Output value"
+        value={String(cfg.value ?? '')}
+        onChange={(v) => onChange({ value: v })}
+        placeholder="Pick a variable or type a static value"
+        nodes={otherNodes}
+        hint="This value becomes the final result of the workflow execution."
+      />
+    </>
+  );
+}

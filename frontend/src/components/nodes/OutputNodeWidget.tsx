@@ -1,0 +1,22 @@
+import type { NodeProps, Node } from '@xyflow/react';
+import { BaseNode } from './BaseNode';
+import type { CanvasNodeData } from '../../store/workflowStore';
+
+type OutputNode = Node<CanvasNodeData, 'workflowNode'>;
+
+export function OutputNodeWidget({ data, selected }: NodeProps<OutputNode>) {
+  const cfg = data.config as { value?: string };
+  return (
+    <BaseNode
+      nodeType="output"
+      label={data.label}
+      isEntry={data.isEntry}
+      isSelected={selected}
+      handles={{ outputs: [] }}
+    >
+      {cfg.value && (
+        <p className="text-[10px] text-slate-400 truncate">{cfg.value}</p>
+      )}
+    </BaseNode>
+  );
+}

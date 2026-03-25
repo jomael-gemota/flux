@@ -2,6 +2,7 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import cors from '@fastify/cors';
 
 import { WorkflowRunner } from './engine/WorkflowRunner';
 import { NodeExecutorRegistry } from './engine/NodeExecutorRegistry';
@@ -56,8 +57,12 @@ async function bootstrap() {
 
 	await runSeeds(workflowRepo);
 
-    // 3. Start background worker
-    createWorkflowWorker(runner, workflowRepo, executionRepo);
+    // 3. Start background worker (only when Redis is available)
+    if (process.env.REDIS_URL) {
+        createWorkflowWorker(runner, workflowRepo, executionRepo);
+    } else {
+        console.log('ℹ️  No REDIS_URL set — running without background worker (synchronous mode)');
+    }
 
     // 4. Start cron scheduler
     const scheduler = new WorkflowScheduler(workflowRepo, workflowService);
@@ -81,6 +86,7 @@ async function bootstrap() {
 		genReqId: () => crypto.randomUUID(),
 	});
 
+    await fastify.register(cors, { origin: process.env.CORS_ORIGIN ?? '*' });
     await fastify.register(helmet);
     await fastify.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 	await fastify.register(sensible);

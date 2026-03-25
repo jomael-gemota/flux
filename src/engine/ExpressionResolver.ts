@@ -5,6 +5,13 @@ export class ExpressionResolver {
     resolve(expression: string, context: ExecutionContext): unknown {
         const trimmed = expression.trim();
 
+        // Strip {{...}} wrapper — the variable picker inserts expressions in this format
+        // so both "nodes.x.field" and "{{nodes.x.field}}" are accepted everywhere.
+        const templateWrapper = trimmed.match(/^\{\{\s*(.+?)\s*\}\}$/);
+        if (templateWrapper) {
+            return this.resolve(templateWrapper[1].trim(), context);
+        }
+
         if (trimmed.startsWith('$')) {
             return this.resolveJsonPath(trimmed, context);
         }
@@ -48,12 +55,39 @@ export class ExpressionResolver {
     private walkPath(obj: unknown, path: string[], fullExpression: string): unknown {
         let current = obj;
 
-        for (const key of path) {
+        for (const rawKey of path) {
             if (current == null || current == undefined) return undefined;
-            if (typeof current !== 'object') {
-                throw new Error(`Cannot access "${key}" on a non-object value in expression: "${fullExpression}"`);
+
+            // Bracket array access attached to a property name: body[0], items[2]
+            const propPlusBracket = rawKey.match(/^(.+?)\[(\d+)\]$/);
+            if (propPlusBracket) {
+                const [, propKey, idxStr] = propPlusBracket;
+                if (typeof current !== 'object') {
+                    throw new Error(`Cannot access "${propKey}" on a non-object value in expression: "${fullExpression}"`);
+                }
+                current = (current as Record<string, unknown>)[propKey];
+                if (current == null) return undefined;
+                if (!Array.isArray(current)) {
+                    throw new Error(`"${propKey}" is not an array in expression: "${fullExpression}"`);
+                }
+                current = current[parseInt(idxStr, 10)];
+                continue;
             }
-            current = (current as Record<string, unknown>)[key];
+
+            // Bare bracket index as its own segment: [0] (e.g. user wrote nodes.x.body.[0])
+            const bareBracket = rawKey.match(/^\[(\d+)\]$/);
+            if (bareBracket) {
+                if (!Array.isArray(current)) {
+                    throw new Error(`Expected an array to index into in expression: "${fullExpression}"`);
+                }
+                current = current[parseInt(bareBracket[1], 10)];
+                continue;
+            }
+
+            if (typeof current !== 'object') {
+                throw new Error(`Cannot access "${rawKey}" on a non-object value in expression: "${fullExpression}"`);
+            }
+            current = (current as Record<string, unknown>)[rawKey];
         }
 
         return current;

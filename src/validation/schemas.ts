@@ -51,6 +51,12 @@ export const CursorPaginationSchema = z.object({
     cursor: z.string().optional(),
 });
 
+export const ExecutionQuerySchema = z.object({
+    workflowId: z.string().min(1),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+    cursor: z.string().optional(),
+});
+
 export type TriggerWorkflowInput = z.infer<typeof TriggerWorkflowSchema>;
 export type WebhookPayloadInput = z.infer<typeof WebhookPayloadSchema>;
 export type WorkflowDefinitionInput = z.infer<typeof WorkflowDefinitionSchema>;
