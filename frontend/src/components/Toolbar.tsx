@@ -1,9 +1,10 @@
-import { Save, Play, Loader2, GitBranch, LogOut, PanelRight } from 'lucide-react';
+import { Save, Play, Loader2, GitBranch, LogOut, PanelRight, KeyRound } from 'lucide-react';
 import { Button } from './ui/Button';
 import { useWorkflowStore } from '../store/workflowStore';
 import { useUpdateWorkflow, useTriggerWorkflow, useCreateWorkflow } from '../hooks/useWorkflows';
 import { serialize } from './canvas/canvasUtils';
 import { useState } from 'react';
+import { CredentialsModal } from './ui/CredentialsModal';
 
 export function Toolbar() {
   const {
@@ -25,6 +26,7 @@ export function Toolbar() {
   const trigger = useTriggerWorkflow();
   const [nameEdit, setNameEdit] = useState(false);
   const [nameValue, setNameValue] = useState('');
+  const [credentialsOpen, setCredentialsOpen] = useState(false);
 
   async function handleSave() {
     if (!activeWorkflow) return;
@@ -100,6 +102,7 @@ export function Toolbar() {
   const isNew = activeWorkflow?.id?.startsWith('__new__') ?? false;
 
   return (
+    <>
     <header className="h-12 bg-slate-900 border-b border-slate-700 flex items-center px-4 gap-4 shrink-0">
       <div className="flex items-center gap-2 text-white font-semibold text-sm">
         <GitBranch className="w-4 h-4 text-blue-400" />
@@ -173,6 +176,17 @@ export function Toolbar() {
         <div className="w-px h-5 bg-slate-700" />
 
         <button
+          onClick={() => setCredentialsOpen(true)}
+          title="Manage Google Workspace credentials"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+        >
+          <KeyRound className="w-3.5 h-3.5" />
+          Credentials
+        </button>
+
+        <div className="w-px h-5 bg-slate-700" />
+
+        <button
           onClick={() => setConfigOpen(!configOpen)}
           title={configOpen ? 'Hide configuration panel' : 'Show configuration panel'}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
@@ -194,5 +208,8 @@ export function Toolbar() {
         </button>
       </div>
     </header>
+
+    <CredentialsModal open={credentialsOpen} onClose={() => setCredentialsOpen(false)} />
+    </>
   );
 }

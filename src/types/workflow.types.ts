@@ -1,4 +1,15 @@
-export type NodeType = 'trigger' | 'llm' | 'http' | 'condition' | 'switch' | 'transform' | 'output';
+export type NodeType =
+    | 'trigger'
+    | 'llm'
+    | 'http'
+    | 'condition'
+    | 'switch'
+    | 'transform'
+    | 'output'
+    | 'gmail'
+    | 'gdrive'
+    | 'gdocs'
+    | 'gsheets';
 
 export interface WorkflowNode {
     id: string;

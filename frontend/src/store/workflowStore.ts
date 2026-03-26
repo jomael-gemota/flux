@@ -78,7 +78,7 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
   isDirty: false,
   setDirty: (dirty) => set({ isDirty: dirty }),
 
-  logOpen: false,
+  logOpen: true,
   setLogOpen: (open) => set({ logOpen: open }),
 
   configOpen: (() => {

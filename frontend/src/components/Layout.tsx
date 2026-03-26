@@ -1,9 +1,9 @@
-import { useRef, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { ScrollText, ChevronUp, ChevronDown } from 'lucide-react';
 import { Toolbar } from './Toolbar';
 import { WorkflowSidebar } from './WorkflowSidebar';
 import { useWorkflowStore } from '../store/workflowStore';
+import { useResizablePanel } from '../hooks/useResizablePanel';
 
 // ── Persistence keys ──────────────────────────────────────────────────────────
 const LS_CONFIG_W = 'wap_panel_config_width';
@@ -17,78 +17,6 @@ const CONFIG_MAX     = 560;
 const LOG_DEFAULT    = 220;
 const LOG_MIN        = 100;
 const LOG_MAX        = 500;
-
-function readStoredNumber(key: string, fallback: number): number {
-  try {
-    const raw = localStorage.getItem(key);
-    const n   = raw != null ? Number(raw) : NaN;
-    return isNaN(n) ? fallback : n;
-  } catch {
-    return fallback;
-  }
-}
-
-// ── Resize-handle hook ────────────────────────────────────────────────────────
-/**
- * Returns a current size value and a mousedown handler that lets the user
- * drag to resize.  Saves the final size to localStorage on every mouse-move
- * so it survives refresh and logout.
- *
- * @param lsKey      localStorage key
- * @param defaultVal initial value when nothing is stored
- * @param min/max    clamp range
- * @param axis       'x' = horizontal handle (resize width)
- *                   'y' = vertical handle (resize height)
- * @param invert     true when dragging toward the origin *grows* the panel
- *                   (e.g. dragging the left edge of the right panel leftward
- *                   increases its width)
- */
-function useResizablePanel(
-  lsKey: string,
-  defaultVal: number,
-  min: number,
-  max: number,
-  axis: 'x' | 'y',
-  invert: boolean,
-) {
-  const [size, setSize] = useState(() => readStoredNumber(lsKey, defaultVal));
-  const sizeRef = useRef(size);
-  sizeRef.current = size;
-
-  const startDrag = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startCoord = axis === 'x' ? e.clientX : e.clientY;
-      const startSize  = sizeRef.current;
-
-      const onMove = (ev: MouseEvent) => {
-        const coord = axis === 'x' ? ev.clientX : ev.clientY;
-        const delta = invert
-          ? startCoord - coord   // toward origin = grow
-          : coord - startCoord;  // away from origin = grow
-        const newSize = Math.max(min, Math.min(max, startSize + delta));
-        setSize(newSize);
-        try { localStorage.setItem(lsKey, String(Math.round(newSize))); } catch { /* ignore */ }
-      };
-
-      const onUp = () => {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup',   onUp);
-        document.body.style.userSelect  = '';
-        document.body.style.cursor      = '';
-      };
-
-      // Prevent text-selection and cursor flicker while dragging
-      document.body.style.userSelect = 'none';
-      document.body.style.cursor     = axis === 'x' ? 'col-resize' : 'row-resize';
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup',   onUp);
-    },
-    [lsKey, axis, invert, min, max],
-  );
-
-  return [size, startDrag] as const;
-}
 
 // ── Layout ────────────────────────────────────────────────────────────────────
 

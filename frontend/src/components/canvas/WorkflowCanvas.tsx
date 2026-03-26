@@ -19,12 +19,17 @@ import {
 import '@xyflow/react/dist/style.css';
 import { useWorkflowStore, type CanvasNode, type CanvasEdge, type CanvasNodeData } from '../../store/workflowStore';
 import { ExecutionEdge, type EdgeExecutionStatus } from '../edges/ExecutionEdge';
+import { NodePickerPopup } from './NodePickerPopup';
 import { HttpNodeWidget } from '../nodes/HttpNodeWidget';
 import { LLMNodeWidget } from '../nodes/LLMNodeWidget';
 import { ConditionNodeWidget } from '../nodes/ConditionNodeWidget';
 import { SwitchNodeWidget } from '../nodes/SwitchNodeWidget';
 import { TransformNodeWidget } from '../nodes/TransformNodeWidget';
 import { OutputNodeWidget } from '../nodes/OutputNodeWidget';
+import { GmailNodeWidget } from '../nodes/GmailNodeWidget';
+import { GDriveNodeWidget } from '../nodes/GDriveNodeWidget';
+import { GDocsNodeWidget } from '../nodes/GDocsNodeWidget';
+import { GSheetsNodeWidget } from '../nodes/GSheetsNodeWidget';
 import type { NodeType } from '../../types/workflow';
 
 function randomId() {
@@ -42,6 +47,10 @@ function WorkflowNodeRenderer(props: NodeProps) {
     case 'switch': return <SwitchNodeWidget {...p} />;
     case 'transform': return <TransformNodeWidget {...p} />;
     case 'output': return <OutputNodeWidget {...p} />;
+    case 'gmail':   return <GmailNodeWidget   {...p} />;
+    case 'gdrive':  return <GDriveNodeWidget  {...p} />;
+    case 'gdocs':   return <GDocsNodeWidget   {...p} />;
+    case 'gsheets': return <GSheetsNodeWidget {...p} />;
     default: return null;
   }
 }
@@ -56,6 +65,10 @@ const DEFAULT_CONFIGS: Partial<Record<NodeType, Record<string, unknown>>> = {
   switch: { cases: [], defaultNext: '' },
   transform: { mappings: {} },
   output: { value: '' },
+  gmail:   { action: 'send',   credentialId: '', to: '', subject: '', body: '' },
+  gdrive:  { action: 'list',   credentialId: '', query: '' },
+  gdocs:   { action: 'read',   credentialId: '', documentId: '' },
+  gsheets: { action: 'read',   credentialId: '', spreadsheetId: '', range: 'Sheet1!A1:Z100' },
 };
 
 function resolveEdgeStatus(
@@ -176,6 +189,39 @@ export function WorkflowCanvas() {
     setSelectedNodeId(null);
   }, [setSelectedNodeId]);
 
+  // Add a node from the floating picker — placed in the visible center of the viewport
+  const handlePickerSelect = useCallback(
+    (type: NodeType, label: string) => {
+      const rf = rfInstance.current;
+      const position = rf
+        ? rf.screenToFlowPosition({
+            x: window.innerWidth / 2,
+            y: window.innerHeight / 2,
+          })
+        : { x: 200 + nodes.length * 30, y: 200 + nodes.length * 30 };
+
+      const id = `node-${randomId()}`;
+      const isFirst = nodes.length === 0;
+      const newNode: CanvasNode = {
+        id,
+        type: 'workflowNode',
+        position,
+        data: {
+          label,
+          nodeType: type,
+          config: { ...(DEFAULT_CONFIGS[type] ?? {}) },
+          isEntry: isFirst,
+        },
+      };
+
+      setNodes([...nodes, newNode]);
+      setSelectedNodeId(id);
+      setConfigOpen(true);
+      setDirty(true);
+    },
+    [nodes, setNodes, setSelectedNodeId, setConfigOpen, setDirty]
+  );
+
   // Derive per-edge execution status and stamp it into edge.data
   const styledEdges = useMemo<CanvasEdge[]>(() => {
     return edges.map((edge) => {
@@ -204,7 +250,7 @@ export function WorkflowCanvas() {
   }
 
   return (
-    <div className="h-full w-full">
+    <div className="h-full w-full relative">
       <ReactFlow
         nodes={nodes}
         edges={styledEdges}
@@ -232,6 +278,9 @@ export function WorkflowCanvas() {
           maskColor="rgba(15,23,42,0.7)"
         />
       </ReactFlow>
+
+      {/* Floating node picker — sits above the React Flow canvas */}
+      <NodePickerPopup onSelect={handlePickerSelect} />
     </div>
   );
 }

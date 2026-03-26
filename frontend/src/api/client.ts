@@ -3,6 +3,7 @@ import type {
   ExecutionSummary,
   PaginatedResponse,
   NodeTestResult,
+  CredentialSummary,
 } from '../types/workflow';
 
 const BASE = '/api';
@@ -129,4 +130,21 @@ export function deleteExecutions(params: {
     method: 'DELETE',
     body: JSON.stringify(params),
   });
+}
+
+// ── Credentials ──────────────────────────────────────────────
+
+export function listCredentials() {
+  return request<CredentialSummary[]>('/credentials');
+}
+
+export function deleteCredential(id: string) {
+  return request<{ deleted: boolean; id: string }>(`/credentials/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+/** Redirects the browser to Google's OAuth consent page */
+export function startGoogleOAuth() {
+  window.location.href = `${BASE}/oauth/google/authorize`;
 }

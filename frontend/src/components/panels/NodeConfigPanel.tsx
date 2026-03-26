@@ -5,6 +5,7 @@ import type { CanvasNode } from '../../store/workflowStore';
 import { Select } from '../ui/Input';
 import { useTestNode, useNodeTestResults } from '../../hooks/useNodeTest';
 import type { NodeTestResult } from '../../types/workflow';
+import { useCredentialList } from '../../hooks/useCredentials';
 
 // ── Output field catalogue (human-friendly labels per node type) ──────────────
 
@@ -37,6 +38,30 @@ const NODE_OUTPUT_FIELDS: Record<string, OutputField[]> = {
   ],
   transform: [{ key: '…', label: 'Use the key names you defined in Mappings' }],
   output: [{ key: 'value', label: 'Resolved output value' }],
+  gmail: [
+    { key: 'messageId', label: 'Message ID (send)' },
+    { key: 'messages', label: 'Message list (list)' },
+    { key: 'body', label: 'Email body text (read)' },
+    { key: 'subject', label: 'Subject (read)' },
+    { key: 'from', label: 'From address (read)' },
+  ],
+  gdrive: [
+    { key: 'files', label: 'File list (list)' },
+    { key: 'id', label: 'Uploaded file ID (upload)' },
+    { key: 'content', label: 'File content text (download)' },
+  ],
+  gdocs: [
+    { key: 'documentId', label: 'Document ID' },
+    { key: 'title', label: 'Document title' },
+    { key: 'text', label: 'Document text content (read)' },
+    { key: 'url', label: 'Edit URL (create)' },
+  ],
+  gsheets: [
+    { key: 'data', label: 'Rows as objects (read)' },
+    { key: 'headers', label: 'Column headers (read)' },
+    { key: 'rows', label: 'Raw rows array (read)' },
+    { key: 'updatedRows', label: 'Rows updated (write/append)' },
+  ],
 };
 
 // ── "No data" badge ───────────────────────────────────────────────────────────
@@ -890,6 +915,18 @@ export function NodeConfigPanel() {
       {nodeType === 'output' && (
         <OutputConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
       )}
+      {nodeType === 'gmail' && (
+        <GmailConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
+      )}
+      {nodeType === 'gdrive' && (
+        <GDriveConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
+      )}
+      {nodeType === 'gdocs' && (
+        <GDocsConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
+      )}
+      {nodeType === 'gsheets' && (
+        <GSheetsConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
+      )}
 
       {/* Retry & Timeout */}
       <div className="border-t border-slate-700" />
@@ -1333,5 +1370,276 @@ function OutputConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
       testResults={testResults}
       hint="This value becomes the final result of the workflow execution."
     />
+  );
+}
+
+// ── Google Workspace shared helper ─────────────────────────────────────────────
+
+function CredentialSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const { data: credentials = [], isLoading } = useCredentialList();
+  return (
+    <div className="space-y-1">
+      <label className="block text-xs font-medium text-slate-400">Google Account</label>
+      {isLoading ? (
+        <p className="text-[10px] text-slate-500">Loading accounts…</p>
+      ) : credentials.length === 0 ? (
+        <p className="text-[10px] text-amber-400">
+          No Google accounts connected. Click <strong>Credentials</strong> in the toolbar to connect one.
+        </p>
+      ) : (
+        <Select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          options={[
+            { value: '', label: '— select account —' },
+            ...credentials.map((c) => ({ value: c.id, label: c.email })),
+          ]}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── GmailConfig ────────────────────────────────────────────────────────────────
+
+function GmailConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
+  const action = (cfg.action as string) ?? 'send';
+  return (
+    <div className="space-y-3">
+      <CredentialSelect
+        value={String(cfg.credentialId ?? '')}
+        onChange={(id) => onChange({ credentialId: id })}
+      />
+      <Select
+        label="Action"
+        value={action}
+        onChange={(e) => onChange({ action: e.target.value })}
+        options={[
+          { value: 'send', label: 'Send Email' },
+          { value: 'list', label: 'List Emails' },
+          { value: 'read', label: 'Read Email' },
+        ]}
+      />
+
+      {action === 'send' && (
+        <>
+          <ExpressionInput label="To" value={String(cfg.to ?? '')} onChange={(v) => onChange({ to: v })}
+            placeholder="recipient@example.com" nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="CC (optional)" value={String(cfg.cc ?? '')} onChange={(v) => onChange({ cc: v })}
+            placeholder="cc@example.com" nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="BCC (optional)" value={String(cfg.bcc ?? '')} onChange={(v) => onChange({ bcc: v })}
+            placeholder="bcc@example.com" nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Subject" value={String(cfg.subject ?? '')} onChange={(v) => onChange({ subject: v })}
+            placeholder="Email subject" nodes={otherNodes} testResults={testResults} />
+          <ExpressionTextArea label="Body" value={String(cfg.body ?? '')} onChange={(v) => onChange({ body: v })}
+            placeholder="Email body…" nodes={otherNodes} testResults={testResults} rows={4} />
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="gmail-html"
+              checked={Boolean(cfg.isHtml)}
+              onChange={(e) => onChange({ isHtml: e.target.checked })}
+              className="w-3.5 h-3.5 rounded"
+            />
+            <label htmlFor="gmail-html" className="text-xs text-slate-400">Send as HTML</label>
+          </div>
+        </>
+      )}
+
+      {action === 'list' && (
+        <>
+          <ExpressionInput label="Search query (Gmail format)" value={String(cfg.query ?? '')}
+            onChange={(v) => onChange({ query: v })} placeholder="from:example.com is:unread"
+            nodes={otherNodes} testResults={testResults} />
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-400">Max results</label>
+            <input type="number" min={1} max={500} value={String(cfg.maxResults ?? 10)}
+              onChange={(e) => onChange({ maxResults: Number(e.target.value) })}
+              className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </div>
+        </>
+      )}
+
+      {action === 'read' && (
+        <ExpressionInput label="Message ID" value={String(cfg.messageId ?? '')}
+          onChange={(v) => onChange({ messageId: v })} placeholder="Enter or pick from a list result"
+          nodes={otherNodes} testResults={testResults} />
+      )}
+    </div>
+  );
+}
+
+// ── GDriveConfig ───────────────────────────────────────────────────────────────
+
+function GDriveConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
+  const action = (cfg.action as string) ?? 'list';
+  return (
+    <div className="space-y-3">
+      <CredentialSelect
+        value={String(cfg.credentialId ?? '')}
+        onChange={(id) => onChange({ credentialId: id })}
+      />
+      <Select
+        label="Action"
+        value={action}
+        onChange={(e) => onChange({ action: e.target.value })}
+        options={[
+          { value: 'list',     label: 'List Files' },
+          { value: 'upload',   label: 'Upload File' },
+          { value: 'download', label: 'Download File' },
+        ]}
+      />
+
+      {action === 'list' && (
+        <>
+          <ExpressionInput label="Search query (Drive format)" value={String(cfg.query ?? '')}
+            onChange={(v) => onChange({ query: v })} placeholder="name contains 'report'"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Folder ID (optional)" value={String(cfg.folderId ?? '')}
+            onChange={(v) => onChange({ folderId: v })} placeholder="Leave blank to search all"
+            nodes={otherNodes} testResults={testResults} />
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-400">Max results</label>
+            <input type="number" min={1} max={1000} value={String(cfg.maxResults ?? 20)}
+              onChange={(e) => onChange({ maxResults: Number(e.target.value) })}
+              className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </div>
+        </>
+      )}
+
+      {action === 'upload' && (
+        <>
+          <ExpressionInput label="File name" value={String(cfg.fileName ?? '')}
+            onChange={(v) => onChange({ fileName: v })} placeholder="report.csv"
+            nodes={otherNodes} testResults={testResults} />
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-400">MIME type</label>
+            <input type="text" value={String(cfg.mimeType ?? 'text/plain')}
+              onChange={(e) => onChange({ mimeType: e.target.value })}
+              className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </div>
+          <ExpressionTextArea label="Content" value={String(cfg.content ?? '')}
+            onChange={(v) => onChange({ content: v })} placeholder="File content or expression"
+            nodes={otherNodes} testResults={testResults} rows={4} />
+          <ExpressionInput label="Folder ID (optional)" value={String(cfg.folderId ?? '')}
+            onChange={(v) => onChange({ folderId: v })} placeholder="Upload destination folder"
+            nodes={otherNodes} testResults={testResults} />
+        </>
+      )}
+
+      {action === 'download' && (
+        <ExpressionInput label="File ID" value={String(cfg.fileId ?? '')}
+          onChange={(v) => onChange({ fileId: v })} placeholder="Google Drive file ID"
+          nodes={otherNodes} testResults={testResults} />
+      )}
+    </div>
+  );
+}
+
+// ── GDocsConfig ────────────────────────────────────────────────────────────────
+
+function GDocsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
+  const action = (cfg.action as string) ?? 'read';
+  return (
+    <div className="space-y-3">
+      <CredentialSelect
+        value={String(cfg.credentialId ?? '')}
+        onChange={(id) => onChange({ credentialId: id })}
+      />
+      <Select
+        label="Action"
+        value={action}
+        onChange={(e) => onChange({ action: e.target.value })}
+        options={[
+          { value: 'create', label: 'Create Document' },
+          { value: 'read',   label: 'Read Document' },
+          { value: 'append', label: 'Append to Document' },
+        ]}
+      />
+
+      {action === 'create' && (
+        <>
+          <ExpressionInput label="Document title" value={String(cfg.title ?? '')}
+            onChange={(v) => onChange({ title: v })} placeholder="My Document"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionTextArea label="Initial content (optional)" value={String(cfg.content ?? '')}
+            onChange={(v) => onChange({ content: v })} placeholder="Starting text…"
+            nodes={otherNodes} testResults={testResults} rows={4} />
+        </>
+      )}
+
+      {(action === 'read' || action === 'append') && (
+        <ExpressionInput label="Document ID" value={String(cfg.documentId ?? '')}
+          onChange={(v) => onChange({ documentId: v })} placeholder="Google Docs document ID"
+          nodes={otherNodes} testResults={testResults} />
+      )}
+
+      {action === 'append' && (
+        <ExpressionTextArea label="Text to append" value={String(cfg.text ?? '')}
+          onChange={(v) => onChange({ text: v })} placeholder="Text to add at the end of the document"
+          nodes={otherNodes} testResults={testResults} rows={4} />
+      )}
+    </div>
+  );
+}
+
+// ── GSheetsConfig ──────────────────────────────────────────────────────────────
+
+function GSheetsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
+  const action = (cfg.action as string) ?? 'read';
+  return (
+    <div className="space-y-3">
+      <CredentialSelect
+        value={String(cfg.credentialId ?? '')}
+        onChange={(id) => onChange({ credentialId: id })}
+      />
+      <Select
+        label="Action"
+        value={action}
+        onChange={(e) => onChange({ action: e.target.value })}
+        options={[
+          { value: 'read',   label: 'Read Rows' },
+          { value: 'write',  label: 'Write / Update Rows' },
+          { value: 'append', label: 'Append Rows' },
+        ]}
+      />
+
+      <ExpressionInput label="Spreadsheet ID" value={String(cfg.spreadsheetId ?? '')}
+        onChange={(v) => onChange({ spreadsheetId: v })} placeholder="Google Sheets spreadsheet ID"
+        nodes={otherNodes} testResults={testResults} />
+
+      <ExpressionInput label="Range (A1 notation)" value={String(cfg.range ?? '')}
+        onChange={(v) => onChange({ range: v })} placeholder="Sheet1!A1:Z100"
+        nodes={otherNodes} testResults={testResults} />
+
+      {(action === 'write' || action === 'append') && (
+        <>
+          <ExpressionTextArea
+            label="Values (2-D array or expression)"
+            value={typeof cfg.values === 'string' ? cfg.values : JSON.stringify(cfg.values ?? [['value1', 'value2']], null, 2)}
+            onChange={(v) => onChange({ values: v })}
+            placeholder={'[["col1","col2"],["val1","val2"]]'}
+            nodes={otherNodes}
+            testResults={testResults}
+            rows={4}
+          />
+          <Select
+            label="Value input option"
+            value={String(cfg.valueInputOption ?? 'USER_ENTERED')}
+            onChange={(e) => onChange({ valueInputOption: e.target.value })}
+            options={[
+              { value: 'USER_ENTERED', label: 'User Entered (parse formulas)' },
+              { value: 'RAW', label: 'Raw (treat as plain text)' },
+            ]}
+          />
+        </>
+      )}
+    </div>
   );
 }

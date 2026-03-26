@@ -2,28 +2,18 @@ import { Handle, Position } from '@xyflow/react';
 import type { ReactNode } from 'react';
 import { useWorkflowStore } from '../../store/workflowStore';
 import type { NodeExecutionStatus } from '../../store/workflowStore';
-
-const TYPE_COLORS: Record<string, string> = {
-  trigger: 'bg-purple-500',
-  http: 'bg-blue-500',
-  llm: 'bg-emerald-500',
-  condition: 'bg-amber-500',
-  switch: 'bg-orange-500',
-  transform: 'bg-cyan-500',
-  output: 'bg-rose-500',
-};
+import { NodeIcon, nodeHeaderColor } from './NodeIcons';
 
 const STATUS_RING: Record<NodeExecutionStatus, string> = {
-  waiting:  'opacity-40',   // pre-execution dim: canvas is "preparing"
-  pending:  'opacity-60',   // execution running but this node hasn't started
+  waiting:  'opacity-40',
+  pending:  'opacity-60',
   running:  'ring-2 ring-blue-400 ring-offset-1 shadow-blue-400/40 shadow-lg',
   success:  'ring-2 ring-emerald-400 ring-offset-1 shadow-emerald-400/30 shadow-md',
   failure:  'ring-2 ring-red-400 ring-offset-1 shadow-red-400/40 shadow-md',
-  skipped:  'opacity-40',   // not reached — visibly distinct but not hidden
+  skipped:  'opacity-40',
 };
 
 const STATUS_BADGE: Partial<Record<NodeExecutionStatus, { icon: string; cls: string }>> = {
-  // 'waiting' intentionally has no badge — it should look like a neutral dim
   running:  { icon: '⏳', cls: 'bg-blue-500 text-white animate-pulse' },
   success:  { icon: '✓',  cls: 'bg-emerald-500 text-white' },
   failure:  { icon: '✕',  cls: 'bg-red-500 text-white' },
@@ -58,11 +48,11 @@ export function BaseNode({
     (s) => (nodeId ? s.executionStatuses[nodeId] : undefined)
   );
 
-  const color = TYPE_COLORS[nodeType] ?? 'bg-slate-500';
-  const inputs = handles?.inputs ?? [{}];
-  const outputs = handles?.outputs ?? [{}];
-  const badge = status ? STATUS_BADGE[status] : undefined;
-  const ringCls = status ? STATUS_RING[status] : '';
+  const headerBg = nodeHeaderColor(nodeType);
+  const inputs   = handles?.inputs  ?? [{}];
+  const outputs  = handles?.outputs ?? [{}];
+  const badge    = status ? STATUS_BADGE[status] : undefined;
+  const ringCls  = status ? STATUS_RING[status]  : '';
 
   return (
     <div
@@ -87,18 +77,26 @@ export function BaseNode({
       )}
 
       {/* Header */}
-      <div className={`${color} rounded-t-md px-3 py-1.5 flex items-center gap-2`}>
+      <div className={`${headerBg} rounded-t-md px-2.5 py-1.5 flex items-center gap-2`}>
+        {/* Icon */}
+        <span className="shrink-0 w-4 h-4 flex items-center justify-center opacity-90">
+          <NodeIcon type={nodeType} size={13} />
+        </span>
+
+        {/* Entry badges */}
         {isEntry && !isParallelEntry && (
-          <span className="text-[10px] font-bold bg-white/30 text-white rounded px-1">
+          <span className="text-[9px] font-bold bg-white/25 text-white rounded px-1 leading-none py-0.5">
             START
           </span>
         )}
         {isEntry && isParallelEntry && (
-          <span className="text-[10px] font-bold bg-white/30 text-white rounded px-1 flex items-center gap-0.5">
+          <span className="text-[9px] font-bold bg-white/25 text-white rounded px-1 leading-none py-0.5 flex items-center gap-0.5">
             ⚡ START
           </span>
         )}
-        <span className="text-[10px] uppercase tracking-wide text-white/80 font-semibold">
+
+        {/* Node type label */}
+        <span className="text-[10px] uppercase tracking-wide text-white/80 font-semibold ml-auto">
           {nodeType}
         </span>
       </div>

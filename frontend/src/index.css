@@ -17,6 +17,12 @@ body {
   cursor: default;
 }
 
+/* ── Thin custom scrollbar for the node picker popup ───────────────────── */
+.scrollbar-thin::-webkit-scrollbar          { width: 4px; }
+.scrollbar-thin::-webkit-scrollbar-track    { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb    { background: rgba(255,255,255,0.10); border-radius: 99px; }
+.scrollbar-thin:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.20); }
+
 /* ── Execution edge: progress-bar sweep ───────────────────────────────
    Uses normalised pathLength="1" on the SVG path element.
    stroke-dasharray:"1" means one dash covering the full path.

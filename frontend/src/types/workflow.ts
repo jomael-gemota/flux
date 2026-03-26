@@ -5,7 +5,11 @@ export type NodeType =
   | 'condition'
   | 'switch'
   | 'transform'
-  | 'output';
+  | 'output'
+  | 'gmail'
+  | 'gdrive'
+  | 'gdocs'
+  | 'gsheets';
 
 export interface WorkflowNode {
   id: string;
@@ -54,6 +58,15 @@ export interface PaginatedResponse<T> {
     nextCursor: string | null;
     limit: number;
   };
+}
+
+export interface CredentialSummary {
+  id: string;
+  provider: 'google';
+  label: string;
+  email: string;
+  scopes: string[];
+  createdAt: string;
 }
 
 export interface NodeTestResult {

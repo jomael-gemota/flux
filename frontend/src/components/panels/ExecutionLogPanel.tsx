@@ -6,7 +6,13 @@ import {
 import { useWorkflowStore } from '../../store/workflowStore';
 import { useExecutionLog, useExecution, useDeleteExecution, useDeleteExecutions } from '../../hooks/useExecutions';
 import { ConfirmModal } from '../ui/ConfirmModal';
+import { useResizablePanel } from '../../hooks/useResizablePanel';
 import type { ExecutionSummary, NodeResult } from '../../types/workflow';
+
+const LS_LOG_SIDEBAR_W  = 'wap_log_sidebar_width';
+const SIDEBAR_DEFAULT   = 208;   // same as w-52
+const SIDEBAR_MIN       = 150;
+const SIDEBAR_MAX       = 380;
 
 // ── Pending-delete descriptor ─────────────────────────────────────────────
 type PendingDelete =
@@ -543,6 +549,11 @@ export function ExecutionLogPanel() {
   // Fetch the selected execution's full details (for node list + output)
   const { data: selectedExec, isLoading: execLoading } = useExecution(selectedExecId);
 
+  const [sidebarWidth, startSidebarDrag] = useResizablePanel(
+    LS_LOG_SIDEBAR_W, SIDEBAR_DEFAULT, SIDEBAR_MIN, SIDEBAR_MAX,
+    'x', false,   // drag rightward = grow
+  );
+
   const workflowId = activeWorkflow?.id;
   const workflowName = activeWorkflow?.name ?? 'Workflow';
 
@@ -595,8 +606,11 @@ export function ExecutionLogPanel() {
 
       {/* ── Body: two-column split ───────────────────────────────────────── */}
       <div className="flex flex-1 min-h-0">
-        {/* Left panel — execution list or node list */}
-        <div className="w-52 shrink-0 border-r border-slate-700/60 overflow-hidden flex flex-col">
+        {/* Left panel — resizable execution list or node list */}
+        <div
+          className="shrink-0 overflow-hidden flex flex-col"
+          style={{ width: sidebarWidth }}
+        >
           {selectedExecId ? (
             execLoading ? (
               <div className="flex justify-center py-6">
@@ -632,6 +646,16 @@ export function ExecutionLogPanel() {
               }}
             />
           )}
+        </div>
+
+        {/* Drag handle between left sidebar and right output pane */}
+        <div
+          className="w-1 shrink-0 cursor-col-resize group relative"
+          onMouseDown={startSidebarDrag}
+          title="Drag to resize"
+        >
+          <div className="absolute inset-0 bg-slate-700/60 group-hover:bg-blue-500 transition-colors duration-150" />
+          <div className="absolute inset-y-0 -inset-x-1" />
         </div>
 
         {/* Right panel — output viewer */}

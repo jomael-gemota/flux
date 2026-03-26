@@ -9,15 +9,23 @@ import { NodeExecutorRegistry } from './engine/NodeExecutorRegistry';
 import { HttpNode } from './nodes/HttpNode';
 import { LLMNode } from './nodes/LLMNode';
 import { ChatMemoryManager } from './llm/ChatMemoryManager';
+import { GmailNode } from './nodes/GmailNode';
+import { GDriveNode } from './nodes/GDriveNode';
+import { GDocsNode } from './nodes/GDocsNode';
+import { GSheetsNode } from './nodes/GSheetsNode';
 
 import { WorkflowRepository } from './repositories/WorkflowRepository';
 import { ExecutionRepository } from './repositories/ExecutionRepository';
+import { CredentialRepository } from './repositories/CredentialRepository';
 import { WorkflowService } from './services/WorkflowService';
+import { GoogleAuthService } from './services/GoogleAuthService';
 
 import { workflowRoutes } from './routes/workflows';
 import { executionRoutes } from './routes/executions';
 import { webhookRoutes } from './routes/webhooks';
 import { apiKeyRoutes } from './routes/apiKeys';
+import { oauthRoutes } from './routes/oauthRoutes';
+import { credentialRoutes } from './routes/credentialRoutes';
 
 import { connectDatabase } from './db/database';
 import crypto from 'crypto';
@@ -51,8 +59,14 @@ async function bootstrap() {
     const runner = new WorkflowRunner(registry);
 
     // 2. Repositories & services
-    const workflowRepo = new WorkflowRepository();
-    const executionRepo = new ExecutionRepository();
+    const workflowRepo    = new WorkflowRepository();
+    const executionRepo   = new ExecutionRepository();
+    const credentialRepo  = new CredentialRepository();
+    const googleAuth      = new GoogleAuthService(credentialRepo);
+    registry.register('gmail',   new GmailNode(googleAuth));
+    registry.register('gdrive',  new GDriveNode(googleAuth));
+    registry.register('gdocs',   new GDocsNode(googleAuth));
+    registry.register('gsheets', new GSheetsNode(googleAuth));
     const workflowService = new WorkflowService(runner, workflowRepo, executionRepo);
 
 	await runSeeds(workflowRepo);
@@ -97,6 +111,8 @@ async function bootstrap() {
     await fastify.register(executionRoutes, { executionRepo, workflowService });
     await fastify.register(webhookRoutes, { workflowService, workflowRepo });
     await fastify.register(apiKeyRoutes);
+    await fastify.register(oauthRoutes,      { googleAuth, credentialRepo });
+    await fastify.register(credentialRoutes, { credentialRepo });
 
     // 6. Health check
     fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
