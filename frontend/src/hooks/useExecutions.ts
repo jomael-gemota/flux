@@ -34,3 +34,25 @@ export function useExecution(id: string | null) {
     },
   });
 }
+
+/**
+ * Powers the Execution Log panel.
+ * Fetches the `limit` most-recent executions and returns the raw
+ * PaginatedResponse so the panel can render a "Load more" button.
+ * Polls every 2 s while any execution is still running.
+ */
+export function useExecutionLog(workflowId: string | null, limit: number) {
+  return useQuery({
+    queryKey: ['executions', 'log', workflowId, limit],
+    queryFn: () => api.listExecutions(workflowId!, limit),
+    enabled: !!workflowId,
+    staleTime: 0,
+    refetchInterval: (query) => {
+      const data = (query.state.data as PaginatedResponse<ExecutionSummary> | undefined)?.data ?? [];
+      const hasActive = data.some(
+        (e) => e.status === 'pending' || e.status === 'running'
+      );
+      return hasActive ? 2000 : false;
+    },
+  });
+}
