@@ -85,7 +85,7 @@ export function serialize(
   rfEdges: CanvasEdge[],
   entryNodeId: string,
   schedule?: string,
-  entryNodeIds?: string[]
+  _entryNodeIds?: string[]
 ): WorkflowDefinition {
   const nodes: WorkflowNode[] = rfNodes.map((rfn) => {
     const d = rfn.data;
