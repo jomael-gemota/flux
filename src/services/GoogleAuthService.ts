@@ -14,7 +14,7 @@ const SCOPES = [
 ];
 
 const getDefaultRedirectUri = () =>
-    `${getBaseUrl()}/oauth/google/callback`;
+    `${getBaseUrl()}/api/oauth/google/callback`;
 
 export class GoogleAuthService {
     private credentialRepo: CredentialRepository;

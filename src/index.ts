@@ -3,6 +3,9 @@ import Fastify from 'fastify';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
+import { existsSync } from 'fs';
+import { join } from 'path';
 
 import { WorkflowRunner } from './engine/WorkflowRunner';
 import { NodeExecutorRegistry } from './engine/NodeExecutorRegistry';
@@ -110,19 +113,32 @@ async function bootstrap() {
     await fastify.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 	await fastify.register(sensible);
 
-    // 5. Register routes
+    // 5. Register routes (all API routes under /api prefix)
 	registerErrorHandler(fastify);
-    await fastify.register(workflowRoutes, { workflowService, workflowRepo, executionRepo, registry });
-    await fastify.register(executionRoutes, { executionRepo, workflowService });
-    await fastify.register(webhookRoutes, { workflowService, workflowRepo });
-    await fastify.register(apiKeyRoutes);
-    await fastify.register(oauthRoutes,      { googleAuth, slackAuth, credentialRepo });
-    await fastify.register(credentialRoutes, { credentialRepo });
+    await fastify.register(workflowRoutes,   { prefix: '/api', workflowService, workflowRepo, executionRepo, registry });
+    await fastify.register(executionRoutes,  { prefix: '/api', executionRepo, workflowService });
+    await fastify.register(webhookRoutes,    { workflowService, workflowRepo });   // no prefix — called by external systems
+    await fastify.register(apiKeyRoutes,     { prefix: '/api' });
+    await fastify.register(oauthRoutes,      { prefix: '/api', googleAuth, slackAuth, credentialRepo });
+    await fastify.register(credentialRoutes, { prefix: '/api', credentialRepo });
 
     // 6. Health check
     fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
 
-    // 7. Start
+    // 7. Serve frontend SPA in production (or when dist/public exists locally)
+    const publicPath = join(__dirname, 'public');
+    if (existsSync(publicPath)) {
+        await fastify.register(fastifyStatic, { root: publicPath, prefix: '/' });
+        fastify.setNotFoundHandler((req, reply) => {
+            if (req.url.startsWith('/api/') || req.url.startsWith('/webhook/')) {
+                reply.code(404).send({ message: `Route ${req.method}:${req.url} not found`, error: 'Not Found', statusCode: 404 });
+            } else {
+                reply.sendFile('index.html');
+            }
+        });
+    }
+
+    // 8. Start
     const PORT = Number(process.env.PORT ?? 3000);
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
     console.log(`🚀 Platform running at ${getBaseUrl()}`);

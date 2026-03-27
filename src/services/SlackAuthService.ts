@@ -24,7 +24,7 @@ const SLACK_USER_SCOPES = [
 ].join(',');
 
 const getDefaultRedirectUri = () =>
-    `${getBaseUrl()}/oauth/slack/callback`;
+    `${getBaseUrl()}/api/oauth/slack/callback`;
 
 export class SlackAuthService {
     private credentialRepo: CredentialRepository;
