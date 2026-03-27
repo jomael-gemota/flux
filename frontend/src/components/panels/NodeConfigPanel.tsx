@@ -1227,6 +1227,9 @@ export function NodeConfigPanel() {
       {nodeType === 'gsheets' && (
         <GSheetsConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
       )}
+      {nodeType === 'slack' && (
+        <SlackConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
+      )}
 
       {/* Retry & Timeout */}
       <div className="border-t border-slate-700" />
@@ -1926,6 +1929,135 @@ function GDocsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
         <ExpressionTextArea label="Text to append" value={String(cfg.text ?? '')}
           onChange={(v) => onChange({ text: v })} placeholder="Text to add at the end of the document"
           nodes={otherNodes} testResults={testResults} rows={4} />
+      )}
+    </div>
+  );
+}
+
+// ── Slack credential helper ────────────────────────────────────────────────────
+
+function SlackCredentialSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const { data: credentials = [], isLoading } = useCredentialList();
+  const slackCreds = credentials.filter((c) => c.provider === 'slack');
+  return (
+    <div className="space-y-1">
+      <label className="block text-xs font-medium text-slate-400">Slack Workspace</label>
+      {isLoading ? (
+        <p className="text-[10px] text-slate-500">Loading workspaces…</p>
+      ) : slackCreds.length === 0 ? (
+        <p className="text-[10px] text-amber-400">
+          No Slack workspaces connected. Click <strong>Credentials</strong> in the toolbar to connect one.
+        </p>
+      ) : (
+        <Select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          options={[
+            { value: '', label: '— select workspace —' },
+            ...slackCreds.map((c) => ({ value: c.id, label: c.label })),
+          ]}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── SlackConfig ────────────────────────────────────────────────────────────────
+
+function SlackConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
+  const action = (cfg.action as string) ?? 'send_message';
+  return (
+    <div className="space-y-3">
+      <SlackCredentialSelect
+        value={String(cfg.credentialId ?? '')}
+        onChange={(id) => onChange({ credentialId: id })}
+      />
+      <Select
+        label="Action"
+        value={action}
+        onChange={(e) => onChange({ action: e.target.value })}
+        options={[
+          { value: 'send_message',  label: 'Send Message to Channel' },
+          { value: 'send_dm',       label: 'Send Direct Message' },
+          { value: 'upload_file',   label: 'Upload File' },
+          { value: 'read_messages', label: 'Read Messages' },
+        ]}
+      />
+
+      {(action === 'send_message' || action === 'upload_file' || action === 'read_messages') && (
+        <ExpressionInput
+          label="Channel"
+          value={String(cfg.channel ?? '')}
+          onChange={(v) => onChange({ channel: v })}
+          placeholder="C1234567890 or #general"
+          nodes={otherNodes}
+          testResults={testResults}
+        />
+      )}
+
+      {action === 'send_dm' && (
+        <ExpressionInput
+          label="User ID"
+          value={String(cfg.userId ?? '')}
+          onChange={(v) => onChange({ userId: v })}
+          placeholder="U1234567890"
+          nodes={otherNodes}
+          testResults={testResults}
+        />
+      )}
+
+      {(action === 'send_message' || action === 'send_dm') && (
+        <ExpressionTextArea
+          label="Message Text"
+          value={String(cfg.text ?? '')}
+          onChange={(v) => onChange({ text: v })}
+          placeholder="Hello from your workflow!"
+          nodes={otherNodes}
+          testResults={testResults}
+          rows={3}
+        />
+      )}
+
+      {action === 'upload_file' && (
+        <>
+          <ExpressionInput
+            label="Filename"
+            value={String(cfg.filename ?? '')}
+            onChange={(v) => onChange({ filename: v })}
+            placeholder="output.txt"
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+          <ExpressionTextArea
+            label="File Content"
+            value={String(cfg.fileContent ?? '')}
+            onChange={(v) => onChange({ fileContent: v })}
+            placeholder="File contents or an expression…"
+            nodes={otherNodes}
+            testResults={testResults}
+            rows={4}
+          />
+        </>
+      )}
+
+      {action === 'read_messages' && (
+        <div className="space-y-1">
+          <label className="block text-xs font-medium text-slate-400">Message limit</label>
+          <input
+            type="number"
+            min={1}
+            max={200}
+            value={String(cfg.limit ?? 10)}
+            onChange={(e) => onChange({ limit: Number(e.target.value) })}
+            className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
       )}
     </div>
   );

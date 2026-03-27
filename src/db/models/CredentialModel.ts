@@ -1,18 +1,18 @@
 import { Schema, model, Document } from 'mongoose';
 
 export interface CredentialDocument extends Document {
-    provider: 'google';
+    provider: 'google' | 'slack';
     label: string;
     email: string;
     accessToken: string;
     refreshToken: string;
-    expiryDate: number;   // Unix ms timestamp
+    expiryDate: number;   // Unix ms timestamp (0 for non-expiring tokens like Slack)
     scopes: string[];
 }
 
 const CredentialSchema = new Schema<CredentialDocument>(
     {
-        provider: { type: String, enum: ['google'], required: true },
+        provider: { type: String, enum: ['google', 'slack'], required: true },
         label:    { type: String, required: true },
         email:    { type: String, required: true },
         accessToken:  { type: String, required: true },

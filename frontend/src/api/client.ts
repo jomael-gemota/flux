@@ -153,3 +153,13 @@ export function startGoogleOAuth() {
 export function checkGoogleConfig() {
   return request<{ configured: boolean; redirectUri: string }>('/oauth/google/status');
 }
+
+/** Redirects the browser to Slack's OAuth consent page */
+export function startSlackOAuth() {
+  window.location.href = `${BASE}/oauth/slack/authorize`;
+}
+
+/** Check whether Slack OAuth is configured on the backend */
+export function checkSlackConfig() {
+  return request<{ configured: boolean; redirectUri: string }>('/oauth/slack/status');
+}

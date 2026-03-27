@@ -52,10 +52,11 @@ const CATEGORIES: PaletteCategory[] = [
     id: 'apps',
     label: 'Applications',
     nodes: [
-      { type: 'gmail',   label: 'Gmail',         description: 'Send, list, read emails'   },
-      { type: 'gdrive',  label: 'Google Drive',  description: 'Manage files & folders'    },
-      { type: 'gdocs',   label: 'Google Docs',   description: 'Create & edit documents'   },
-      { type: 'gsheets', label: 'Google Sheets', description: 'Read & write spreadsheets' },
+      { type: 'gmail',   label: 'Gmail',         description: 'Send, list, read emails'               },
+      { type: 'gdrive',  label: 'Google Drive',  description: 'Manage files & folders'                },
+      { type: 'gdocs',   label: 'Google Docs',   description: 'Create & edit documents'               },
+      { type: 'gsheets', label: 'Google Sheets', description: 'Read & write spreadsheets'             },
+      { type: 'slack',   label: 'Slack',         description: 'Send messages, DMs, upload files, read channels' },
     ],
   },
 ];

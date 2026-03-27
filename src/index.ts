@@ -13,12 +13,14 @@ import { GmailNode } from './nodes/GmailNode';
 import { GDriveNode } from './nodes/GDriveNode';
 import { GDocsNode } from './nodes/GDocsNode';
 import { GSheetsNode } from './nodes/GSheetsNode';
+import { SlackNode } from './nodes/SlackNode';
 
 import { WorkflowRepository } from './repositories/WorkflowRepository';
 import { ExecutionRepository } from './repositories/ExecutionRepository';
 import { CredentialRepository } from './repositories/CredentialRepository';
 import { WorkflowService } from './services/WorkflowService';
 import { GoogleAuthService } from './services/GoogleAuthService';
+import { SlackAuthService } from './services/SlackAuthService';
 
 import { workflowRoutes } from './routes/workflows';
 import { executionRoutes } from './routes/executions';
@@ -63,10 +65,12 @@ async function bootstrap() {
     const executionRepo   = new ExecutionRepository();
     const credentialRepo  = new CredentialRepository();
     const googleAuth      = new GoogleAuthService(credentialRepo);
+    const slackAuth       = new SlackAuthService(credentialRepo);
     registry.register('gmail',   new GmailNode(googleAuth));
     registry.register('gdrive',  new GDriveNode(googleAuth));
     registry.register('gdocs',   new GDocsNode(googleAuth));
     registry.register('gsheets', new GSheetsNode(googleAuth));
+    registry.register('slack',   new SlackNode(slackAuth));
     const workflowService = new WorkflowService(runner, workflowRepo, executionRepo);
 
 	await runSeeds(workflowRepo);
@@ -111,7 +115,7 @@ async function bootstrap() {
     await fastify.register(executionRoutes, { executionRepo, workflowService });
     await fastify.register(webhookRoutes, { workflowService, workflowRepo });
     await fastify.register(apiKeyRoutes);
-    await fastify.register(oauthRoutes,      { googleAuth, credentialRepo });
+    await fastify.register(oauthRoutes,      { googleAuth, slackAuth, credentialRepo });
     await fastify.register(credentialRoutes, { credentialRepo });
 
     // 6. Health check

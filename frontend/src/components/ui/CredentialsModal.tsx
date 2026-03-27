@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { X, Plus, Trash2, Loader2, CheckCircle2, AlertCircle, ExternalLink, Settings } from 'lucide-react';
+import { X, Plus, Trash2, Loader2, CheckCircle2, AlertCircle, ExternalLink, Settings, MessageSquare } from 'lucide-react';
 import { useCredentialList, useDeleteCredential } from '../../hooks/useCredentials';
-import { startGoogleOAuth, checkGoogleConfig } from '../../api/client';
+import { startGoogleOAuth, checkGoogleConfig, startSlackOAuth, checkSlackConfig } from '../../api/client';
 import { ConfirmModal } from './ConfirmModal';
 import type { CredentialSummary } from '../../types/workflow';
 import { useQuery } from '@tanstack/react-query';
@@ -28,8 +28,15 @@ export function CredentialsModal({ open, onClose }: CredentialsModalProps) {
     enabled: open,
     staleTime: 30_000,
   });
+  const { data: slackConfig } = useQuery({
+    queryKey: ['slack-config'],
+    queryFn: checkSlackConfig,
+    enabled: open,
+    staleTime: 30_000,
+  });
 
-  const isGoogleConfigured = googleConfig?.configured ?? true; // optimistic until loaded
+  const isGoogleConfigured = googleConfig?.configured ?? true;
+  const isSlackConfigured  = slackConfig?.configured  ?? true;
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [oauthStatus, setOAuthStatus] = useState<'success' | 'error' | null>(null);
@@ -40,9 +47,13 @@ export function CredentialsModal({ open, onClose }: CredentialsModalProps) {
     if (!open) return;
     const params = new URLSearchParams(window.location.search);
     if (params.has('oauth_success')) {
+      const provider = params.get('oauth_success');
       setOAuthStatus('success');
-      setOauthMessage('Google account connected successfully!');
-      // Clean up URL
+      setOauthMessage(
+        provider === 'slack'
+          ? 'Slack workspace connected successfully!'
+          : 'Google account connected successfully!'
+      );
       const clean = window.location.pathname;
       window.history.replaceState({}, '', clean);
       refetch();
@@ -65,21 +76,20 @@ export function CredentialsModal({ open, onClose }: CredentialsModalProps) {
   if (!open) return null;
 
   const pendingCred = credentials.find((c) => c.id === pendingDeleteId);
+  const googleCreds = credentials.filter((c) => c.provider === 'google');
+  const slackCreds  = credentials.filter((c) => c.provider === 'slack');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px]" onClick={onClose} />
 
-      <div className="relative bg-slate-800 border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[80vh]">
+      <div className="relative bg-slate-800 border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[85vh]">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-700 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center">
-            <GoogleIcon className="w-4 h-4" />
-          </div>
           <div className="flex-1 min-w-0">
             <h2 className="text-sm font-semibold text-white">Connected Accounts</h2>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Manage Google Workspace credentials used by Gmail, Drive, Docs, and Sheets nodes.
+              Manage credentials for Google Workspace and Slack integrations.
             </p>
           </div>
           <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
@@ -110,85 +120,136 @@ export function CredentialsModal({ open, onClose }: CredentialsModalProps) {
           </div>
         )}
 
-        {/* Account list */}
-        <div className="flex-1 overflow-y-auto min-h-0 p-4 space-y-2">
+        {/* Credential list */}
+        <div className="flex-1 overflow-y-auto min-h-0 p-4 space-y-4">
           {isLoading && (
             <div className="flex justify-center py-6">
               <Loader2 className="w-5 h-5 text-slate-500 animate-spin" />
             </div>
           )}
-          {!isLoading && credentials.length === 0 && (
-            <div className="text-center py-10 text-slate-500">
-              <GoogleIcon className="w-8 h-8 mx-auto mb-3 opacity-30" />
-              <p className="text-sm">No Google accounts connected yet.</p>
-              <p className="text-xs mt-1">Click "Connect Google Account" to get started.</p>
-            </div>
-          )}
-          {credentials.map((cred) => (
-            <CredentialRow
-              key={cred.id}
-              cred={cred}
-              onDelete={() => setPendingDeleteId(cred.id)}
-            />
-          ))}
-        </div>
 
-        {/* Footer — setup guide if not configured, connect button if ready */}
-        {!isGoogleConfigured ? (
-          <div className="border-t border-slate-700 shrink-0 px-5 py-4 space-y-3">
-            <div className="flex items-start gap-2.5 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-              <Settings className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <div className="space-y-1 min-w-0">
-                <p className="text-xs font-semibold text-amber-300">Google OAuth not configured</p>
-                <p className="text-[11px] text-amber-400/80 leading-relaxed">
-                  Add these to your <code className="bg-amber-900/40 px-1 rounded">.env</code> file and restart the backend:
-                </p>
-                <pre className="text-[10px] text-amber-300/90 bg-slate-900 rounded p-2 mt-1.5 leading-relaxed overflow-x-auto">
+          {/* ── Google section ── */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <GoogleIcon className="w-4 h-4" />
+                <span className="text-xs font-semibold text-slate-300">Google Workspace</span>
+              </div>
+              {isGoogleConfigured ? (
+                <button
+                  onClick={startGoogleOAuth}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-medium rounded-lg transition-colors"
+                >
+                  <Plus className="w-3 h-3" />
+                  Connect Account
+                </button>
+              ) : (
+                <span className="text-[10px] text-amber-400 flex items-center gap-1">
+                  <Settings className="w-3 h-3" />
+                  Not configured
+                </span>
+              )}
+            </div>
+
+            {!isGoogleConfigured && (
+              <div className="flex items-start gap-2.5 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                <Settings className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1 min-w-0">
+                  <p className="text-[11px] text-amber-400/80 leading-relaxed">
+                    Add these to your <code className="bg-amber-900/40 px-1 rounded">.env</code> file and restart the backend:
+                  </p>
+                  <pre className="text-[10px] text-amber-300/90 bg-slate-900 rounded p-2 mt-1.5 leading-relaxed overflow-x-auto">
 {`GOOGLE_CLIENT_ID=your-client-id
 GOOGLE_CLIENT_SECRET=your-secret
 GOOGLE_REDIRECT_URI=http://localhost:3000/oauth/google/callback`}
-                </pre>
+                  </pre>
+                  <a
+                    href="https://console.cloud.google.com/apis/credentials"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    Get credentials from Google Cloud Console
+                  </a>
+                </div>
               </div>
-            </div>
+            )}
+
+            {!isLoading && googleCreds.length === 0 && isGoogleConfigured && (
+              <p className="text-[11px] text-slate-500 pl-1">No Google accounts connected yet.</p>
+            )}
+            {googleCreds.map((cred) => (
+              <CredentialRow key={cred.id} cred={cred} onDelete={() => setPendingDeleteId(cred.id)} />
+            ))}
+          </div>
+
+          {/* ── Divider ── */}
+          <div className="border-t border-slate-700" />
+
+          {/* ── Slack section ── */}
+          <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <a
-                href="https://console.cloud.google.com/apis/credentials"
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-1.5 text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
-              >
-                <ExternalLink className="w-3 h-3" />
-                Get credentials from Google Cloud Console
-              </a>
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-violet-400" />
+                <span className="text-xs font-semibold text-slate-300">Slack</span>
+              </div>
+              {isSlackConfigured ? (
+                <button
+                  onClick={startSlackOAuth}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-medium rounded-lg transition-colors"
+                >
+                  <Plus className="w-3 h-3" />
+                  Connect Workspace
+                </button>
+              ) : (
+                <span className="text-[10px] text-amber-400 flex items-center gap-1">
+                  <Settings className="w-3 h-3" />
+                  Not configured
+                </span>
+              )}
             </div>
+
+            {!isSlackConfigured && (
+              <div className="flex items-start gap-2.5 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                <Settings className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1 min-w-0">
+                  <p className="text-[11px] text-amber-400/80 leading-relaxed">
+                    Add these to your <code className="bg-amber-900/40 px-1 rounded">.env</code> file and restart the backend:
+                  </p>
+                  <pre className="text-[10px] text-amber-300/90 bg-slate-900 rounded p-2 mt-1.5 leading-relaxed overflow-x-auto">
+{`SLACK_CLIENT_ID=your-client-id
+SLACK_CLIENT_SECRET=your-secret
+SLACK_REDIRECT_URI=http://localhost:3000/oauth/slack/callback`}
+                  </pre>
+                  <a
+                    href="https://api.slack.com/apps"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    Create a Slack app at api.slack.com/apps
+                  </a>
+                </div>
+              </div>
+            )}
+
+            {!isLoading && slackCreds.length === 0 && isSlackConfigured && (
+              <p className="text-[11px] text-slate-500 pl-1">No Slack workspaces connected yet.</p>
+            )}
+            {slackCreds.map((cred) => (
+              <CredentialRow key={cred.id} cred={cred} onDelete={() => setPendingDeleteId(cred.id)} />
+            ))}
           </div>
-        ) : (
-          <div className="flex items-center justify-between px-5 py-4 border-t border-slate-700 shrink-0">
-            <a
-              href="https://console.cloud.google.com/apis/credentials"
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
-            >
-              <ExternalLink className="w-3 h-3" />
-              Google Cloud Console
-            </a>
-            <button
-              onClick={startGoogleOAuth}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Connect Google Account
-            </button>
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Delete confirmation */}
       <ConfirmModal
         open={pendingDeleteId !== null}
         title="Disconnect account?"
-        message={`Remove "${pendingCred?.email ?? ''}" from connected accounts? Any workflow nodes using this credential will stop working.`}
+        message={`Remove "${pendingCred?.label ?? pendingCred?.email ?? ''}" from connected accounts? Any workflow nodes using this credential will stop working.`}
         confirmLabel="Disconnect"
         danger
         isLoading={deleteCredential.isPending}
@@ -204,17 +265,22 @@ GOOGLE_REDIRECT_URI=http://localhost:3000/oauth/google/callback`}
 }
 
 function CredentialRow({ cred, onDelete }: { cred: CredentialSummary; onDelete: () => void }) {
-  const serviceLabels = cred.scopes
-    .map((s) => GOOGLE_SERVICE_LABELS[s])
-    .filter(Boolean);
+  const isSlack = cred.provider === 'slack';
+  const serviceLabels = isSlack
+    ? []
+    : cred.scopes.map((s) => GOOGLE_SERVICE_LABELS[s]).filter(Boolean);
+  const displayName = isSlack ? cred.label : cred.email;
 
   return (
     <div className="flex items-start gap-3 bg-slate-700/40 border border-slate-600/40 rounded-lg px-3.5 py-3">
-      <GoogleIcon className="w-5 h-5 shrink-0 mt-0.5" />
+      {isSlack
+        ? <MessageSquare className="w-5 h-5 text-violet-400 shrink-0 mt-0.5" />
+        : <GoogleIcon className="w-5 h-5 shrink-0 mt-0.5" />
+      }
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-white truncate">{cred.email}</p>
+        <p className="text-sm font-medium text-white truncate">{displayName}</p>
         <p className="text-[11px] text-slate-500 mt-0.5">
-          {cred.label !== cred.email ? `Label: ${cred.label} · ` : ''}
+          {!isSlack && cred.label !== cred.email ? `Label: ${cred.label} · ` : ''}
           Connected {new Date(cred.createdAt).toLocaleDateString()}
         </p>
         {serviceLabels.length > 0 && (

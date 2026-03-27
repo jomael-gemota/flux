@@ -1,12 +1,13 @@
 import { FastifyInstance } from 'fastify';
 import { GoogleAuthService } from '../services/GoogleAuthService';
+import { SlackAuthService } from '../services/SlackAuthService';
 import { CredentialRepository } from '../repositories/CredentialRepository';
 
 export async function oauthRoutes(
     fastify: FastifyInstance,
-    options: { googleAuth: GoogleAuthService; credentialRepo: CredentialRepository }
+    options: { googleAuth: GoogleAuthService; slackAuth: SlackAuthService; credentialRepo: CredentialRepository }
 ): Promise<void> {
-    const { googleAuth, credentialRepo } = options;
+    const { googleAuth, slackAuth, credentialRepo } = options;
 
     /** Check whether Google OAuth is configured */
     fastify.get('/oauth/google/status', async (_request, reply) => {
@@ -65,6 +66,50 @@ export async function oauthRoutes(
             } catch (err) {
                 const msg = err instanceof Error ? err.message : 'oauth_error';
                 fastify.log.error(err, 'Google OAuth callback failed');
+                return reply.redirect(`${frontendBase}?oauth_error=${encodeURIComponent(msg)}`);
+            }
+        }
+    );
+
+    // ── Slack OAuth ────────────────────────────────────────────────────────────
+
+    /** Check whether Slack OAuth is configured */
+    fastify.get('/oauth/slack/status', async (_request, reply) => {
+        const configured = slackAuth.isConfigured();
+        const redirectUri = process.env.SLACK_REDIRECT_URI ?? 'http://localhost:3000/oauth/slack/callback';
+        return reply.code(200).send({ configured, redirectUri });
+    });
+
+    /** Redirect browser to Slack consent page */
+    fastify.get('/oauth/slack/authorize', async (_request, reply) => {
+        if (!slackAuth.isConfigured()) {
+            const msg = encodeURIComponent(
+                'Slack OAuth is not configured. Add SLACK_CLIENT_ID and SLACK_CLIENT_SECRET to your .env file.'
+            );
+            const frontendBase = process.env.CORS_ORIGIN ?? 'http://localhost:5173';
+            return reply.redirect(`${frontendBase}?oauth_error=${msg}`);
+        }
+        const url = slackAuth.getAuthorizationUrl();
+        return reply.redirect(url);
+    });
+
+    /** Slack redirects here after the user approves */
+    fastify.get<{ Querystring: { code?: string; error?: string } }>(
+        '/oauth/slack/callback',
+        async (request, reply) => {
+            const { code, error } = request.query;
+            const frontendBase = process.env.CORS_ORIGIN ?? 'http://localhost:5173';
+
+            if (error || !code) {
+                return reply.redirect(`${frontendBase}?oauth_error=${encodeURIComponent(error ?? 'missing_code')}`);
+            }
+
+            try {
+                await slackAuth.handleCallback(code);
+                return reply.redirect(`${frontendBase}?oauth_success=slack`);
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : 'oauth_error';
+                fastify.log.error(err, 'Slack OAuth callback failed');
                 return reply.redirect(`${frontendBase}?oauth_error=${encodeURIComponent(msg)}`);
             }
         }

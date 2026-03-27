@@ -2,7 +2,7 @@ import { CredentialModel, CredentialDocument } from '../db/models/CredentialMode
 
 export interface CredentialSummary {
     id: string;
-    provider: 'google';
+    provider: 'google' | 'slack';
     label: string;
     email: string;
     scopes: string[];
@@ -18,7 +18,7 @@ export interface CredentialTokens {
 export class CredentialRepository {
 
     async create(data: {
-        provider: 'google';
+        provider: 'google' | 'slack';
         label: string;
         email: string;
         accessToken: string;
