@@ -268,12 +268,12 @@ export function WorkflowCanvas() {
         defaultEdgeOptions={{ type: 'execution' }}
         fitView
         deleteKeyCode="Delete"
-        className="bg-slate-950"
+        className="bg-slate-950/90"
       >
-        <Background variant={BackgroundVariant.Dots} color="#334155" gap={20} size={1} />
-        <Controls className="!bg-slate-800 !border-slate-600 !text-slate-300" />
+        <Background variant={BackgroundVariant.Dots} color="#475569" gap={20} size={1} />
+        <Controls className="!bg-slate-900/55 !backdrop-blur-md !border-white/15 !text-slate-300" />
         <MiniMap
-          className="!bg-slate-900 !border-slate-700"
+          className="!bg-slate-900/60 !backdrop-blur-md !border-white/15"
           nodeColor="#3b82f6"
           maskColor="rgba(15,23,42,0.7)"
         />

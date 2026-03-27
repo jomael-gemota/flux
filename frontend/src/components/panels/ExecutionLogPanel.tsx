@@ -586,8 +586,8 @@ export function ExecutionLogPanel() {
 
   if (!workflowId || workflowId.startsWith('__new__')) {
     return (
-      <div className="flex flex-col h-full bg-slate-900">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700 shrink-0">
+      <div className="flex flex-col h-full glass-surface">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 shrink-0">
           <span className="text-xs font-semibold text-slate-300">Logs</span>
           <button onClick={() => setLogOpen(false)} className="text-slate-500 hover:text-white transition-colors">
             <X className="w-3.5 h-3.5" />
@@ -603,14 +603,14 @@ export function ExecutionLogPanel() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-900">
+    <div className="flex flex-col h-full glass-surface">
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-3 py-1.5 border-b border-slate-700 shrink-0">
+      <div className="flex items-center gap-3 px-3 py-1.5 border-b border-white/10 shrink-0">
         <span className="text-xs font-semibold text-slate-300 shrink-0">Logs</span>
 
         {selectedExec ? (
           <>
-            <div className="w-px h-4 bg-slate-700 shrink-0" />
+            <div className="w-px h-4 glass-divider shrink-0" />
             <div className="flex-1 min-w-0">
               <ExecDetailHeader exec={selectedExec} workflowName={workflowName} />
             </div>

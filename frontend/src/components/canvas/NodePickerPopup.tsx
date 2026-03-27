@@ -245,10 +245,10 @@ export function NodePickerPopup({ onSelect }: NodePickerPopupProps) {
         type="button"
         onClick={() => setOpen((p) => !p)}
         title="Add a node"
-        className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold shadow-lg transition-all duration-200 select-none backdrop-blur-md border ${
+        className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold shadow-lg transition-all duration-200 select-none border ${
           open
-            ? 'bg-blue-500/30 border-blue-400/50 text-blue-200 shadow-blue-500/20'
-            : 'bg-white/10 border-white/15 text-white/80 hover:bg-white/15 hover:border-white/25 hover:text-white shadow-black/30'
+            ? 'bg-blue-600 border-blue-500 text-white shadow-blue-600/25'
+            : 'bg-slate-900 border-slate-700 text-slate-200 hover:bg-slate-800 hover:border-slate-600 hover:text-white shadow-black/40'
         }`}
       >
         <Plus
@@ -257,23 +257,22 @@ export function NodePickerPopup({ onSelect }: NodePickerPopupProps) {
         Add Node
       </button>
 
-      {/* ── Floating glass panel ─────────────────────────────────────────── */}
+      {/* ── Floating panel ───────────────────────────────────────────────── */}
       {open && (
         <div
           className="mt-2 w-72 flex flex-col rounded-2xl overflow-hidden
-                     bg-slate-900/60 backdrop-blur-xl
-                     border border-white/10
-                     shadow-2xl shadow-black/60
-                     ring-1 ring-white/5"
+                     bg-slate-900
+                     border border-slate-700
+                     shadow-2xl shadow-black/60"
           style={{ maxHeight: 'calc(100vh - 130px)' }}
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 pt-3.5 pb-2 shrink-0">
-            <p className="text-xs font-semibold text-white/70 tracking-wide">Node Types</p>
+            <p className="text-xs font-semibold text-slate-300 tracking-wide">Node Types</p>
             <button
               type="button"
               onClick={() => setOpen(false)}
-              className="text-white/30 hover:text-white/80 transition-colors p-0.5 rounded"
+              className="text-slate-500 hover:text-slate-200 transition-colors p-0.5 rounded"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -281,21 +280,21 @@ export function NodePickerPopup({ onSelect }: NodePickerPopupProps) {
 
           {/* Search */}
           <div className="px-3 pb-2.5 shrink-0">
-            <div className="flex items-center gap-2 bg-white/8 border border-white/10 rounded-xl px-3 py-1.5 focus-within:border-blue-400/50 focus-within:bg-white/12 transition-all">
-              <Search className="w-3.5 h-3.5 text-white/30 shrink-0" />
+            <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 focus-within:border-blue-500 transition-all">
+              <Search className="w-3.5 h-3.5 text-slate-500 shrink-0" />
               <input
                 ref={searchRef}
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search nodes…"
-                className="flex-1 bg-transparent text-white/80 text-xs placeholder-white/25 focus:outline-none"
+                className="flex-1 bg-transparent text-slate-200 text-xs placeholder-slate-500 focus:outline-none"
               />
               {query && (
                 <button
                   type="button"
                   onClick={() => setQuery('')}
-                  className="text-white/30 hover:text-white/70 transition-colors"
+                  className="text-slate-500 hover:text-slate-300 transition-colors"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -304,7 +303,7 @@ export function NodePickerPopup({ onSelect }: NodePickerPopupProps) {
           </div>
 
           {/* Divider */}
-          <div className="h-px bg-white/8 mx-3 shrink-0" />
+          <div className="h-px bg-slate-700/70 mx-3 shrink-0" />
 
           {/* Scrollable node list */}
           <div className="overflow-y-auto flex-1 py-2

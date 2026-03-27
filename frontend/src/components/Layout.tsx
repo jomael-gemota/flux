@@ -64,20 +64,20 @@ export function Layout({ canvas, configPanel, executionLog }: LayoutProps) {
                 <div className="absolute inset-0 bg-slate-700 group-hover:bg-blue-500 transition-colors duration-150" />
                 <div className="absolute inset-x-0 -inset-y-1" />
               </div>
-              <div className="shrink-0 overflow-hidden" style={{ height: logHeight }}>
+              <div className="shrink-0 overflow-hidden glass-surface" style={{ height: logHeight }}>
                 {executionLog}
               </div>
             </>
           )}
 
           {/* Bottom bar — always visible */}
-          <div className="h-8 shrink-0 bg-slate-900 border-t border-slate-700 flex items-stretch">
+          <div className="h-8 shrink-0 glass-surface-soft border-t border-white/10 flex items-stretch">
             <button
               onClick={() => setLogOpen(!logOpen)}
-              className={`flex items-center gap-1.5 px-4 text-xs font-medium border-r border-slate-700 transition-colors ${
+              className={`flex items-center gap-1.5 px-4 text-xs font-medium border-r border-white/10 transition-colors ${
                 logOpen
-                  ? 'bg-slate-800 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  ? 'bg-white/10 text-white'
+                  : 'text-slate-400 hover:text-white hover:bg-white/10'
               }`}
               title={logOpen ? 'Collapse execution log' : 'Open execution log'}
             >
@@ -101,7 +101,7 @@ export function Layout({ canvas, configPanel, executionLog }: LayoutProps) {
               onMouseDown={startConfigDrag}
               title="Drag to resize"
             >
-              <div className="absolute inset-0 bg-slate-700 group-hover:bg-blue-500 transition-colors duration-150" />
+              <div className="absolute inset-0 bg-slate-700/70 group-hover:bg-blue-500 transition-colors duration-150" />
               <div className="absolute inset-y-0 -inset-x-1" />
             </div>
             {/*
@@ -111,7 +111,7 @@ export function Layout({ canvas, configPanel, executionLog }: LayoutProps) {
               scrollable area that is bounded by the panel's available height.
             */}
             <div
-              className="flex flex-col bg-slate-900 border-l border-slate-700 shrink-0 overflow-hidden"
+              className="flex flex-col glass-surface border-l border-white/10 shrink-0 overflow-hidden"
               style={{ width: configWidth }}
             >
               <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">

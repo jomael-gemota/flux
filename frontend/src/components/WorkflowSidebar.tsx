@@ -52,9 +52,9 @@ export function WorkflowSidebar() {
   }
 
   return (
-    <aside className="w-56 bg-slate-900 border-r border-slate-700 flex flex-col shrink-0 overflow-hidden">
+    <aside className="w-56 glass-surface border-r border-white/10 flex flex-col shrink-0 overflow-hidden">
       {/* ── Workflow list ──────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700 shrink-0">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 shrink-0">
         <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
           Workflows
         </span>
@@ -79,8 +79,8 @@ export function WorkflowSidebar() {
                 key={wf.id}
                 className={`group flex items-center gap-1 px-3 py-1.5 cursor-pointer transition-colors ${
                   activeWorkflow?.id === wf.id
-                    ? 'bg-blue-600/20 text-blue-300'
-                    : 'text-slate-300 hover:bg-slate-800'
+                    ? 'bg-blue-500/20 text-blue-200'
+                    : 'text-slate-300 hover:bg-white/8'
                 }`}
                 onClick={() => loadWorkflow(wf)}
               >

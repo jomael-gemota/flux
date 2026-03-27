@@ -72,19 +72,19 @@ export function Toolbar() {
 
   return (
     <>
-    <header className="h-12 bg-slate-900 border-b border-slate-700 flex items-center px-4 gap-4 shrink-0">
+    <header className="h-12 glass-surface border-b border-white/10 flex items-center px-4 gap-4 shrink-0">
       <div className="flex items-center gap-2 text-white font-semibold text-sm">
         <GitBranch className="w-4 h-4 text-blue-400" />
         <span className="text-slate-300">Workflow Platform</span>
       </div>
 
-      <div className="w-px h-6 bg-slate-700" />
+      <div className="w-px h-6 glass-divider" />
 
       {activeWorkflow ? (
         nameEdit ? (
           <input
             autoFocus
-            className="bg-slate-800 border border-slate-600 text-white text-sm rounded px-2 py-0.5 w-56 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="bg-white/8 border border-white/15 text-white text-sm rounded px-2 py-0.5 w-56 focus:outline-none focus:ring-1 focus:ring-blue-500"
             value={nameValue}
             onChange={(e) => setNameValue(e.target.value)}
             onBlur={() => {
@@ -142,26 +142,26 @@ export function Toolbar() {
           Trigger
         </Button>
 
-        <div className="w-px h-5 bg-slate-700" />
+        <div className="w-px h-5 glass-divider" />
 
         <button
           onClick={() => setCredentialsOpen(true)}
           title="Manage Google Workspace credentials"
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-white/10 transition-colors"
         >
           <KeyRound className="w-3.5 h-3.5" />
           Credentials
         </button>
 
-        <div className="w-px h-5 bg-slate-700" />
+        <div className="w-px h-5 glass-divider" />
 
         <button
           onClick={() => setConfigOpen(!configOpen)}
           title={configOpen ? 'Hide configuration panel' : 'Show configuration panel'}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
             configOpen
-              ? 'bg-slate-700 text-slate-200'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              ? 'bg-white/10 text-slate-200'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-white/10'
           }`}
         >
           <PanelRight className="w-3.5 h-3.5" />
