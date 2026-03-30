@@ -106,27 +106,44 @@ export async function teamsDataRoutes(
             const allUsers: UserEntry[] = [];
             let nextLink: string | undefined;
 
-            do {
-                const res = nextLink
-                    ? await client.api(nextLink).get() as { value: Array<Record<string, unknown>>; '@odata.nextLink'?: string }
-                    : await client
-                        .api('/users')
-                        .select('id,displayName,mail,userPrincipalName')
-                        .filter("accountEnabled eq true and userType eq 'Member'")
-                        .top(100)
-                        .get() as { value: Array<Record<string, unknown>>; '@odata.nextLink'?: string };
+            try {
+                do {
+                    const res = nextLink
+                        ? await client.api(nextLink).get() as { value: Array<Record<string, unknown>>; '@odata.nextLink'?: string }
+                        : await client
+                            .api('/users')
+                            .header('ConsistencyLevel', 'eventual')
+                            .query('$count=true')
+                            .select('id,displayName,mail,userPrincipalName')
+                            .filter('accountEnabled eq true')
+                            .top(100)
+                            .get() as { value: Array<Record<string, unknown>>; '@odata.nextLink'?: string };
 
-                for (const u of res.value ?? []) {
-                    allUsers.push({
-                        id:                u.id as string,
-                        displayName:       (u.displayName as string) ?? '',
-                        mail:              (u.mail as string) ?? '',
-                        userPrincipalName: (u.userPrincipalName as string) ?? '',
+                    for (const u of res.value ?? []) {
+                        allUsers.push({
+                            id:                u.id as string,
+                            displayName:       (u.displayName as string) ?? '',
+                            mail:              (u.mail as string) ?? '',
+                            userPrincipalName: (u.userPrincipalName as string) ?? '',
+                        });
+                    }
+
+                    nextLink = res['@odata.nextLink'] as string | undefined;
+                } while (nextLink);
+            } catch (err: unknown) {
+                const statusCode = (err as Record<string, unknown>)?.statusCode;
+                if (statusCode === 403) {
+                    return reply.code(403).send({
+                        statusCode: 403,
+                        error: 'Forbidden',
+                        message:
+                            'Microsoft Graph denied access to list users. ' +
+                            'Please reconnect your Microsoft account from the Credentials panel ' +
+                            'to grant the User.ReadBasic.All permission.',
                     });
                 }
-
-                nextLink = res['@odata.nextLink'] as string | undefined;
-            } while (nextLink);
+                throw err;
+            }
 
             allUsers.sort((a, b) => a.displayName.localeCompare(b.displayName));
 

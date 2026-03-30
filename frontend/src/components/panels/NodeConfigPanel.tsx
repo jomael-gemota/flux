@@ -2362,7 +2362,9 @@ function TeamsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
 
   const { teams,    isLoading: loadingTeams,    isError: errorTeams }    = useTeamsTeams(credentialId);
   const { channels, isLoading: loadingChannels, isError: errorChannels } = useTeamsChannels(credentialId, teamId);
-  const { data: users = [], isLoading: loadingUsers, isError: errorUsers } = useTeamsUsers(credentialId);
+  const { data: users = [], isLoading: loadingUsers, isError: errorUsers } = useTeamsUsers(
+    action === 'send_dm' ? credentialId : ''
+  );
 
   const teamItems = teams.map((t) => ({ id: t.id, display: t.displayName }));
   const channelItems = channels.map((c) => ({
@@ -2480,49 +2482,47 @@ function TeamsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
 
       {action === 'send_dm' && (
         <div className="space-y-1">
-          <span className="block text-xs font-medium text-slate-400">User</span>
           {!credentialId ? (
-            <p className="text-[10px] text-slate-500">Select an account first.</p>
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-slate-400">User</label>
+              <p className="text-[10px] text-slate-500">Select an account first.</p>
+            </div>
           ) : loadingUsers ? (
-            <div className="flex items-center gap-1.5 text-[10px] text-slate-500 py-1">
-              <Loader2 className="w-3 h-3 animate-spin" /> Loading users…
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-slate-400">User</label>
+              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 py-1">
+                <Loader2 className="w-3 h-3 animate-spin" /> Loading users…
+              </div>
             </div>
           ) : errorUsers ? (
-            <ExpressionInput
-              label=""
-              value={String(cfg.userId ?? '')}
-              onChange={(v) => onChange({ userId: v })}
-              placeholder="User ID or {{nodes.x.userId}}"
-              nodes={otherNodes}
-              testResults={testResults}
-            />
-          ) : (
-            <>
-              <div className="max-h-36 overflow-y-auto rounded-md border border-slate-600 bg-slate-800 divide-y divide-slate-700">
-                {userItems.length === 0 && (
-                  <p className="text-[10px] text-slate-500 px-2.5 py-2">No users found.</p>
-                )}
-                {userItems.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => onChange({ userId: item.id })}
-                    className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors ${
-                      item.id === (cfg.userId as string)
-                        ? 'bg-blue-600/30 text-blue-300'
-                        : 'text-slate-300 hover:bg-slate-700'
-                    }`}
-                  >
-                    {item.display}
-                  </button>
-                ))}
-              </div>
-              {cfg.userId && users.length > 0 && (
-                <p className="text-[10px] text-slate-500 truncate">
-                  Selected: <span className="text-slate-300">{users.find((u) => u.id === cfg.userId)?.displayName ?? String(cfg.userId)}</span>
+            <div className="space-y-2">
+              <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
+                <p className="text-[10px] text-amber-300 leading-relaxed">
+                  Could not load users. This usually means your Microsoft account needs to be reconnected
+                  to grant the <code className="font-mono bg-amber-500/20 px-0.5 rounded">User.ReadBasic.All</code> permission.
+                  Go to <strong>Credentials</strong> and reconnect your Microsoft account, then try again.
                 </p>
-              )}
-            </>
+              </div>
+              <ExpressionInput
+                label="User"
+                value={String(cfg.userId ?? '')}
+                onChange={(v) => onChange({ userId: v })}
+                placeholder="User ID or {{nodes.x.userId}}"
+                nodes={otherNodes}
+                testResults={testResults}
+              />
+            </div>
+          ) : (
+            <Select
+              label="User"
+              value={String(cfg.userId ?? '')}
+              onChange={(e) => onChange({ userId: e.target.value })}
+              options={[
+                { value: '', label: '— select user —' },
+                ...userItems.map((u) => ({ value: u.id, label: u.display })),
+              ]}
+            />
           )}
         </div>
       )}
