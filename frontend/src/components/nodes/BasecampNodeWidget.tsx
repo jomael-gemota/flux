@@ -5,12 +5,13 @@ import type { CanvasNodeData } from '../../store/workflowStore';
 type BasecampNode = Node<CanvasNodeData, 'workflowNode'>;
 
 const ACTION_LABELS: Record<string, string> = {
-  create_todo:   'Create To-Do',
-  complete_todo: 'Complete To-Do',
-  post_message:  'Post Message',
-  post_comment:  'Post Comment',
-  send_campfire: 'Campfire Message',
-  list_todos:    'List To-Dos',
+  create_todo:     'Create To-Do',
+  complete_todo:   'Complete To-Do',
+  uncomplete_todo: 'Re-Open To-Do',
+  post_message:    'Post Message',
+  post_comment:    'Post Comment',
+  send_campfire:   'Campfire Message',
+  list_todos:      'List To-Dos',
 };
 
 export function BasecampNodeWidget({ id, data, selected }: NodeProps<BasecampNode>) {

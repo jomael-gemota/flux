@@ -27,12 +27,12 @@ export function useBasecampTodolists(credentialId: string, projectId: string) {
   });
 }
 
-export function useBasecampTodos(credentialId: string, todolistId: string, status: 'active' | 'all' = 'active') {
+export function useBasecampTodos(credentialId: string, todolistId: string, status: 'active' | 'completed' | 'all' = 'active') {
   return useQuery({
     queryKey:  ['basecamp-todos', credentialId, todolistId, status],
     queryFn:   () => listBasecampTodos(credentialId, todolistId, status),
     enabled:   !!credentialId && !!todolistId,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 15_000,
     retry:     false,
   });
 }

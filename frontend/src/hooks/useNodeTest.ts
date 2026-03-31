@@ -25,6 +25,8 @@ export function useTestNode() {
     }) => api.testNode(workflowId, nodeId, context),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['node-test-results', vars.workflowId] });
+      // Refresh data pickers so completion status, etc. stay in sync after a test run
+      qc.invalidateQueries({ queryKey: ['basecamp-todos'] });
     },
   });
 }

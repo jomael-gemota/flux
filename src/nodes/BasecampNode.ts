@@ -8,6 +8,7 @@ const USER_AGENT = 'WorkflowAutomationPlatform (basecamp-integration)';
 type BasecampAction =
     | 'create_todo'
     | 'complete_todo'
+    | 'uncomplete_todo'
     | 'post_message'
     | 'post_comment'
     | 'send_campfire'
@@ -103,6 +104,19 @@ export class BasecampNode implements NodeExecutor {
                 throw new Error(`Basecamp complete_todo failed (${res.status}): ${await res.text()}`);
             }
             return { todoId, completed: true };
+        }
+
+        if (action === 'uncomplete_todo') {
+            const todoId = this.resolver.resolveTemplate(config.todoId ?? '', context);
+            if (!todoId) throw new Error('Basecamp uncomplete_todo: todoId is required');
+
+            const res = await fetch(`${baseUrl}/todos/${todoId}/completion.json`, {
+                method: 'DELETE', headers,
+            });
+            if (!res.ok && res.status !== 204) {
+                throw new Error(`Basecamp uncomplete_todo failed (${res.status}): ${await res.text()}`);
+            }
+            return { todoId, completed: false };
         }
 
         if (action === 'post_message') {

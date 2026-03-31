@@ -301,7 +301,7 @@ export function listBasecampTodolists(credentialId: string, projectId: string) {
   );
 }
 
-export function listBasecampTodos(credentialId: string, todolistId: string, status: 'active' | 'all' = 'active') {
+export function listBasecampTodos(credentialId: string, todolistId: string, status: 'active' | 'completed' | 'all' = 'active') {
   return request<BasecampTodo[]>(
     `/basecamp/todos?credentialId=${encodeURIComponent(credentialId)}&todolistId=${encodeURIComponent(todolistId)}&status=${status}`
   );

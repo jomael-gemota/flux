@@ -71,7 +71,7 @@ const NODE_OUTPUT_FIELDS: Record<string, OutputField[]> = {
     { key: 'id', label: 'Created/matched resource ID' },
     { key: 'title', label: 'To-do title (create)' },
     { key: 'status', label: 'Action status (created/posted/sent)' },
-    { key: 'completed', label: 'Completion flag (complete_todo)' },
+    { key: 'completed', label: 'Completion flag (complete/uncomplete)' },
     { key: 'todos', label: 'To-do list (list_todos)' },
     { key: 'count', label: 'To-do count (list_todos)' },
   ],
@@ -2762,8 +2762,9 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
   const { data: todoGroups = [], isLoading: loadingGroups } = useBasecampTodoGroups(
     needsTodolistForAction(action) ? credentialId : '', todolistId
   );
+  const todoStatus = action === 'uncomplete_todo' ? 'completed' as const : 'active' as const;
   const { data: todos = [],     isLoading: loadingTodos,     isError: errorTodos }     = useBasecampTodos(
-    (action === 'complete_todo') ? credentialId : '', todolistId, includeCompleted ? 'all' : 'active'
+    (action === 'complete_todo' || action === 'uncomplete_todo') ? credentialId : '', todolistId, todoStatus
   );
   const { data: people = [],    isLoading: loadingPeople }    = useBasecampPeople(credentialId, projectId || undefined);
 
@@ -2782,12 +2783,13 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
         value={action}
         onChange={(e) => onChange({ action: e.target.value, projectId: '', todolistId: '', groupId: '', todoId: '' })}
         options={[
-          { value: 'create_todo',   label: 'Create To-Do' },
-          { value: 'complete_todo', label: 'Complete / Uncomplete a To-Do' },
-          { value: 'post_message',  label: 'Post Message' },
-          { value: 'post_comment',  label: 'Post Comment' },
-          { value: 'send_campfire', label: 'Send Campfire Message' },
-          { value: 'list_todos',    label: 'List To-Dos' },
+          { value: 'create_todo',     label: 'Create To-Do' },
+          { value: 'complete_todo',   label: 'Complete a To-Do' },
+          { value: 'uncomplete_todo', label: 'Re-Open a To-Do' },
+          { value: 'post_message',    label: 'Post Message' },
+          { value: 'post_comment',    label: 'Post Comment' },
+          { value: 'send_campfire',   label: 'Send Campfire Message' },
+          { value: 'list_todos',      label: 'List To-Dos' },
         ]}
       />
 
@@ -2962,13 +2964,12 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
         </>
       )}
 
-      {/* ── complete_todo fields ──────────────────────────────────────── */}
-      {action === 'complete_todo' && (
+      {/* ── complete_todo / uncomplete_todo fields ──────────────────────── */}
+      {(action === 'complete_todo' || action === 'uncomplete_todo') && (
         <>
           {/* Optional: pick from a list if project + todolist are set */}
-          {needsProject && (
-            <div className="space-y-1">
-              <span className="block text-xs font-medium text-slate-400">Project (optional, to browse to-dos)</span>
+          <div className="space-y-1">
+            <span className="block text-xs font-medium text-slate-400">Project (optional, to browse to-dos)</span>
               {!credentialId ? (
                 <p className="text-[10px] text-slate-500">Select an account first.</p>
               ) : loadingProjects ? (
@@ -2985,8 +2986,7 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
                   ]}
                 />
               )}
-            </div>
-          )}
+          </div>
 
           {projectId && (
             <div className="space-y-1">
@@ -3009,25 +3009,17 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
           )}
 
           {todolistId && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="basecamp-complete-include-completed"
-                  checked={includeCompleted}
-                  onChange={(e) => onChange({ includeCompleted: e.target.checked })}
-                  className="w-3.5 h-3.5 rounded"
-                />
-                <label htmlFor="basecamp-complete-include-completed" className="text-xs text-slate-400">
-                  Include completed to-dos (including hidden)
-                </label>
-              </div>
+            <div className="space-y-1">
               <span className="block text-xs font-medium text-slate-400">
-                To-Do {todos.length > 0 && <span className="text-slate-600 font-normal">({todos.length} {includeCompleted ? 'total' : 'active'})</span>}
+                To-Do {todos.length > 0 && (
+                  <span className="text-slate-600 font-normal">
+                    ({todos.length} {action === 'uncomplete_todo' ? 'completed' : 'active'})
+                  </span>
+                )}
               </span>
               {loadingTodos ? (
                 <div className="flex items-center gap-1.5 text-[10px] text-slate-500 py-1">
-                  <Loader2 className="w-3 h-3 animate-spin" /> Loading to-dos…
+                  <Loader2 className="w-3 h-3 animate-spin" /> Loading {action === 'uncomplete_todo' ? 'completed' : 'active'} to-dos…
                 </div>
               ) : errorTodos ? (
                 <p className="text-[10px] text-red-400">Failed to load to-dos.</p>
