@@ -9,7 +9,7 @@ import { useCredentialList } from '../../hooks/useCredentials';
 import { useSaveWorkflow } from '../../hooks/useSaveWorkflow';
 import { useSlackChannels, useSlackUsers } from '../../hooks/useSlackData';
 import { useTeamsTeams, useTeamsChannels, useTeamsUsers } from '../../hooks/useTeamsData';
-import { useBasecampProjects, useBasecampTodolists, useBasecampTodos, useBasecampPeople } from '../../hooks/useBasecampData';
+import { useBasecampProjects, useBasecampTodolists, useBasecampTodos, useBasecampTodoGroups, useBasecampPeople } from '../../hooks/useBasecampData';
 import { NodeIcon } from '../nodes/NodeIcons';
 
 // ── Output field catalogue (human-friendly labels per node type) ──────────────
@@ -2603,20 +2603,169 @@ function BasecampCredentialSelect({
   );
 }
 
+// ── BasecampAssigneePicker ──────────────────────────────────────────────────
+
+function BasecampAssigneePicker({
+  people,
+  loading,
+  hasProject,
+  assigneeIds,
+  onChange,
+  otherNodes,
+  testResults,
+}: {
+  people: Array<{ id: number; name: string; email: string; company: string | null }>;
+  loading: boolean;
+  hasProject: boolean;
+  assigneeIds: string;
+  onChange: (ids: string) => void;
+  otherNodes: ConfigProps['otherNodes'];
+  testResults: ConfigProps['testResults'];
+}) {
+  const [filter, setFilter] = useState('');
+  const currentIds = assigneeIds.split(',').map((s) => s.trim()).filter(Boolean);
+  const selectedCount = currentIds.length;
+
+  if (!hasProject) {
+    return (
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-400">Assignees (optional)</label>
+        <p className="text-[10px] text-slate-500">Select a project first to see available people.</p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-400">Assignees (optional)</label>
+        <div className="flex items-center gap-1.5 text-[10px] text-slate-500 py-1">
+          <Loader2 className="w-3 h-3 animate-spin" /> Loading people…
+        </div>
+      </div>
+    );
+  }
+
+  if (people.length === 0) {
+    return (
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-400">Assignees (optional)</label>
+        <ExpressionInput
+          value={assigneeIds}
+          onChange={onChange}
+          placeholder="Comma-separated person IDs"
+          nodes={otherNodes}
+          testResults={testResults}
+        />
+      </div>
+    );
+  }
+
+  const q = filter.toLowerCase();
+  const filtered = q
+    ? people.filter((p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.email.toLowerCase().includes(q) ||
+        (p.company ?? '').toLowerCase().includes(q)
+      )
+    : people;
+
+  const companies = [...new Set(filtered.map((p) => p.company ?? ''))].sort((a, b) =>
+    !a ? 1 : !b ? -1 : a.localeCompare(b)
+  );
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <label className="block text-xs font-medium text-slate-400">Assignees (optional)</label>
+        <span className="text-[10px] text-slate-500">{people.length} people</span>
+      </div>
+
+      {selectedCount > 0 && (
+        <p className="text-[10px] text-green-400">{selectedCount} assignee{selectedCount !== 1 ? 's' : ''} selected</p>
+      )}
+
+      <input
+        type="text"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="Search by name, email, or company…"
+        className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500 placeholder-slate-500"
+      />
+
+      <div className="max-h-64 overflow-y-auto rounded-md border border-slate-600 bg-slate-800">
+        {filtered.length === 0 && (
+          <p className="text-[10px] text-slate-500 px-2.5 py-2">No people match "{filter}"</p>
+        )}
+        {companies.map((company) => {
+          const group = filtered.filter((p) => (p.company ?? '') === company);
+          return (
+            <div key={company || '__none__'}>
+              {companies.length > 1 && (
+                <div className="px-2.5 py-1 bg-slate-700/50 border-b border-slate-700 sticky top-0 z-[1]">
+                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                    {company || 'No company'}
+                  </span>
+                  <span className="text-[10px] text-slate-500 ml-1.5">({group.length})</span>
+                </div>
+              )}
+              {group.map((p) => {
+                const isSelected = currentIds.includes(String(p.id));
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      const next = isSelected
+                        ? currentIds.filter((id) => id !== String(p.id))
+                        : [...currentIds, String(p.id)];
+                      onChange(next.join(','));
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors flex items-center gap-2 border-b border-slate-700/50 last:border-0 ${
+                      isSelected ? 'bg-green-600/20 text-green-300' : 'text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    <span className={`w-3 h-3 rounded border flex items-center justify-center shrink-0 ${
+                      isSelected ? 'bg-green-600 border-green-500' : 'border-slate-500'
+                    }`}>
+                      {isSelected && <Check className="w-2 h-2 text-white" />}
+                    </span>
+                    <span className="truncate">{p.name}</span>
+                    {p.email && <span className="text-[10px] text-slate-500 truncate ml-auto">{p.email}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── BasecampConfig ──────────────────────────────────────────────────────────
+
+function needsTodolistForAction(action: string): boolean {
+  return ['create_todo', 'list_todos'].includes(action);
+}
 
 function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
   const action       = (cfg.action as string) ?? 'create_todo';
   const credentialId = String(cfg.credentialId ?? '');
   const projectId    = String(cfg.projectId ?? '');
   const todolistId   = String(cfg.todolistId ?? '');
+  const groupId          = String(cfg.groupId ?? '');
+  const includeCompleted = Boolean(cfg.includeCompleted);
 
   const { data: projects = [],  isLoading: loadingProjects,  isError: errorProjects }  = useBasecampProjects(credentialId);
   const { data: todolists = [], isLoading: loadingTodolists, isError: errorTodolists } = useBasecampTodolists(credentialId, projectId);
-  const { data: todos = [],     isLoading: loadingTodos,     isError: errorTodos }     = useBasecampTodos(
-    (action === 'complete_todo') ? credentialId : '', todolistId
+  const { data: todoGroups = [], isLoading: loadingGroups } = useBasecampTodoGroups(
+    needsTodolistForAction(action) ? credentialId : '', todolistId
   );
-  const { data: people = [],    isLoading: loadingPeople }    = useBasecampPeople(credentialId);
+  const { data: todos = [],     isLoading: loadingTodos,     isError: errorTodos }     = useBasecampTodos(
+    (action === 'complete_todo') ? credentialId : '', todolistId, includeCompleted ? 'all' : 'active'
+  );
+  const { data: people = [],    isLoading: loadingPeople }    = useBasecampPeople(credentialId, projectId || undefined);
 
   const needsProject  = ['create_todo', 'post_message', 'send_campfire', 'list_todos'].includes(action);
   const needsTodolist = ['create_todo', 'list_todos'].includes(action);
@@ -2625,13 +2774,13 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
     <div className="space-y-3">
       <BasecampCredentialSelect
         value={credentialId}
-        onChange={(id) => onChange({ credentialId: id, projectId: '', todolistId: '', todoId: '' })}
+        onChange={(id) => onChange({ credentialId: id, projectId: '', todolistId: '', groupId: '', todoId: '' })}
       />
 
       <Select
         label="Action"
         value={action}
-        onChange={(e) => onChange({ action: e.target.value, projectId: '', todolistId: '', todoId: '' })}
+        onChange={(e) => onChange({ action: e.target.value, projectId: '', todolistId: '', groupId: '', todoId: '' })}
         options={[
           { value: 'create_todo',   label: 'Create To-Do' },
           { value: 'complete_todo', label: 'Complete / Uncomplete a To-Do' },
@@ -2663,7 +2812,7 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => onChange({ projectId: String(p.id), todolistId: '', todoId: '' })}
+                  onClick={() => onChange({ projectId: String(p.id), todolistId: '', groupId: '', todoId: '' })}
                   className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors ${
                     String(p.id) === projectId
                       ? 'bg-green-600/30 text-green-300'
@@ -2702,7 +2851,7 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
                 <button
                   key={tl.id}
                   type="button"
-                  onClick={() => onChange({ todolistId: String(tl.id), todoId: '' })}
+                  onClick={() => onChange({ todolistId: String(tl.id), groupId: '', todoId: '' })}
                   className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors ${
                     String(tl.id) === todolistId
                       ? 'bg-green-600/30 text-green-300'
@@ -2720,6 +2869,53 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
           {todolistId && todolists.length > 0 && (
             <p className="text-[10px] text-slate-500 truncate">
               Selected: <span className="text-slate-300">{todolists.find((tl) => String(tl.id) === todolistId)?.name ?? todolistId}</span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* ── Group (section) picker (optional, cascading from todolist) ── */}
+      {needsTodolist && todolistId && (
+        <div className="space-y-1">
+          <label className="block text-xs font-medium text-slate-400">
+            Group / Section <span className="text-slate-600">(optional)</span>
+          </label>
+          {loadingGroups && <p className="text-xs text-slate-500 italic">Loading groups…</p>}
+          {!loadingGroups && todoGroups.length === 0 && (
+            <p className="text-[10px] text-slate-600 italic">No groups in this to-do list (all to-dos are ungrouped)</p>
+          )}
+          {!loadingGroups && todoGroups.length > 0 && (
+            <div className="max-h-36 overflow-y-auto rounded-md border border-slate-600 bg-slate-800">
+              <button
+                type="button"
+                onClick={() => onChange({ groupId: '' })}
+                className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors ${
+                  !groupId
+                    ? 'bg-green-600/30 text-green-300'
+                    : 'text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                (Ungrouped / Top-level)
+              </button>
+              {todoGroups.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => onChange({ groupId: String(g.id) })}
+                  className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors ${
+                    String(g.id) === groupId
+                      ? 'bg-green-600/30 text-green-300'
+                      : 'text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  {g.name}
+                </button>
+              ))}
+            </div>
+          )}
+          {groupId && todoGroups.length > 0 && (
+            <p className="text-[10px] text-slate-500 truncate">
+              Selected: <span className="text-slate-300">{todoGroups.find((g) => String(g.id) === groupId)?.name ?? groupId}</span>
             </p>
           )}
         </div>
@@ -2754,51 +2950,15 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
             testResults={testResults}
           />
           {/* Assignees multi-select */}
-          <div className="space-y-1">
-            <label className="block text-xs font-medium text-slate-400">Assignees (optional)</label>
-            {loadingPeople ? (
-              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 py-1">
-                <Loader2 className="w-3 h-3 animate-spin" /> Loading people…
-              </div>
-            ) : people.length > 0 ? (
-              <div className="max-h-32 overflow-y-auto rounded-md border border-slate-600 bg-slate-800 divide-y divide-slate-700">
-                {people.map((p) => {
-                  const currentIds = String(cfg.assigneeIds ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-                  const isSelected = currentIds.includes(String(p.id));
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        const next = isSelected
-                          ? currentIds.filter((id) => id !== String(p.id))
-                          : [...currentIds, String(p.id)];
-                        onChange({ assigneeIds: next.join(',') });
-                      }}
-                      className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors flex items-center gap-2 ${
-                        isSelected ? 'bg-green-600/20 text-green-300' : 'text-slate-300 hover:bg-slate-700'
-                      }`}
-                    >
-                      <span className={`w-3 h-3 rounded border flex items-center justify-center shrink-0 ${
-                        isSelected ? 'bg-green-600 border-green-500' : 'border-slate-500'
-                      }`}>
-                        {isSelected && <Check className="w-2 h-2 text-white" />}
-                      </span>
-                      {p.name}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <ExpressionInput
-                value={String(cfg.assigneeIds ?? '')}
-                onChange={(v) => onChange({ assigneeIds: v })}
-                placeholder="Comma-separated person IDs"
-                nodes={otherNodes}
-                testResults={testResults}
-              />
-            )}
-          </div>
+          <BasecampAssigneePicker
+            people={people}
+            loading={loadingPeople}
+            hasProject={!!projectId}
+            assigneeIds={String(cfg.assigneeIds ?? '')}
+            onChange={(ids) => onChange({ assigneeIds: ids })}
+            otherNodes={otherNodes}
+            testResults={testResults}
+          />
         </>
       )}
 
@@ -2849,8 +3009,22 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
           )}
 
           {todolistId && (
-            <div className="space-y-1">
-              <span className="block text-xs font-medium text-slate-400">To-Do</span>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="basecamp-complete-include-completed"
+                  checked={includeCompleted}
+                  onChange={(e) => onChange({ includeCompleted: e.target.checked })}
+                  className="w-3.5 h-3.5 rounded"
+                />
+                <label htmlFor="basecamp-complete-include-completed" className="text-xs text-slate-400">
+                  Include completed to-dos (including hidden)
+                </label>
+              </div>
+              <span className="block text-xs font-medium text-slate-400">
+                To-Do {todos.length > 0 && <span className="text-slate-600 font-normal">({todos.length} {includeCompleted ? 'total' : 'active'})</span>}
+              </span>
               {loadingTodos ? (
                 <div className="flex items-center gap-1.5 text-[10px] text-slate-500 py-1">
                   <Loader2 className="w-3 h-3 animate-spin" /> Loading to-dos…
@@ -2858,24 +3032,61 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
               ) : errorTodos ? (
                 <p className="text-[10px] text-red-400">Failed to load to-dos.</p>
               ) : (
-                <div className="max-h-36 overflow-y-auto rounded-md border border-slate-600 bg-slate-800 divide-y divide-slate-700">
+                <div className="max-h-64 overflow-y-auto rounded-md border border-slate-600 bg-slate-800">
                   {todos.length === 0 && (
                     <p className="text-[10px] text-slate-500 px-2.5 py-2">No to-dos found.</p>
                   )}
-                  {todos.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => onChange({ todoId: String(t.id) })}
-                      className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors ${
-                        String(t.id) === String(cfg.todoId ?? '')
-                          ? 'bg-green-600/30 text-green-300'
-                          : 'text-slate-300 hover:bg-slate-700'
-                      }`}
-                    >
-                      {t.title}
-                    </button>
-                  ))}
+                  {(() => {
+                    const ungrouped = todos.filter((t) => !t.groupName);
+                    const grouped = todos.filter((t) => !!t.groupName);
+                    const groupNames = [...new Set(grouped.map((t) => t.groupName!))];
+                    return (
+                      <>
+                        {ungrouped.length > 0 && groupNames.length > 0 && (
+                          <div className="px-2.5 py-1 text-[10px] font-semibold text-slate-500 bg-slate-900/50 uppercase tracking-wider">
+                            Ungrouped
+                          </div>
+                        )}
+                        {ungrouped.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => onChange({ todoId: String(t.id) })}
+                            className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors flex items-center gap-1.5 ${
+                              String(t.id) === String(cfg.todoId ?? '')
+                                ? 'bg-green-600/30 text-green-300'
+                                : t.completed ? 'text-slate-500 hover:bg-slate-700' : 'text-slate-300 hover:bg-slate-700'
+                            }`}
+                          >
+                            <span className={`inline-block w-2.5 h-2.5 rounded-sm border flex-shrink-0 ${t.completed ? 'bg-green-600/60 border-green-600' : 'border-slate-500'}`} />
+                            <span className={t.completed ? 'line-through' : ''}>{t.title}</span>
+                          </button>
+                        ))}
+                        {groupNames.map((gn) => (
+                          <div key={gn}>
+                            <div className="px-2.5 py-1 text-[10px] font-semibold text-slate-500 bg-slate-900/50 uppercase tracking-wider">
+                              {gn}
+                            </div>
+                            {grouped.filter((t) => t.groupName === gn).map((t) => (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => onChange({ todoId: String(t.id) })}
+                                className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors pl-4 flex items-center gap-1.5 ${
+                                  String(t.id) === String(cfg.todoId ?? '')
+                                    ? 'bg-green-600/30 text-green-300'
+                                    : t.completed ? 'text-slate-500 hover:bg-slate-700' : 'text-slate-300 hover:bg-slate-700'
+                                }`}
+                              >
+                                <span className={`inline-block w-2.5 h-2.5 rounded-sm border flex-shrink-0 ${t.completed ? 'bg-green-600/60 border-green-600' : 'border-slate-500'}`} />
+                                <span className={t.completed ? 'line-through' : ''}>{t.title}</span>
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -2958,13 +3169,13 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
         <div className="flex items-center gap-2">
           <input
             type="checkbox"
-            id="basecamp-completed"
-            checked={Boolean(cfg.completed)}
-            onChange={(e) => onChange({ completed: e.target.checked })}
+            id="basecamp-include-completed"
+            checked={includeCompleted}
+            onChange={(e) => onChange({ includeCompleted: e.target.checked })}
             className="w-3.5 h-3.5 rounded"
           />
-          <label htmlFor="basecamp-completed" className="text-xs text-slate-400">
-            Show completed to-dos only
+          <label htmlFor="basecamp-include-completed" className="text-xs text-slate-400">
+            Include completed to-dos (including hidden)
           </label>
         </div>
       )}

@@ -28,13 +28,47 @@ export async function basecampDataRoutes(
         return res.json();
     }
 
+    /**
+     * Fetches all pages of a paginated Basecamp list endpoint.
+     * Basecamp signals the next page via a `Link: <url>; rel="next"` header.
+     */
+    async function basecampFetchAll(credentialId: string, path: string): Promise<Array<Record<string, unknown>>> {
+        const token     = await basecampAuth.getToken(credentialId);
+        const accountId = await basecampAuth.getAccountId(credentialId);
+        let nextUrl: string | null = `https://3.basecampapi.com/${accountId}${path}`;
+
+        const allResults: Array<Record<string, unknown>> = [];
+
+        while (nextUrl) {
+            const res: Response = await fetch(nextUrl, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'User-Agent':  USER_AGENT,
+                },
+            });
+
+            if (!res.ok) {
+                throw new Error(`Basecamp API error (${res.status}): ${await res.text()}`);
+            }
+
+            const page = await res.json() as Array<Record<string, unknown>>;
+            allResults.push(...page);
+
+            const linkHeader: string = res.headers.get('Link') ?? '';
+            const nextMatch: RegExpMatchArray | null = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+            nextUrl = nextMatch ? nextMatch[1] : null;
+        }
+
+        return allResults;
+    }
+
     fastify.get<{ Querystring: { credentialId: string } }>(
         '/basecamp/projects',
         async (request, reply) => {
             const { credentialId } = request.query;
             if (!credentialId) return reply.badRequest('credentialId is required');
 
-            const projects = await basecampFetch(credentialId, '/projects.json') as Array<Record<string, unknown>>;
+            const projects = await basecampFetchAll(credentialId, '/projects.json');
             return reply.send(
                 projects.map((p) => ({
                     id:   p.id,
@@ -61,7 +95,7 @@ export async function basecampDataRoutes(
                 return reply.send([]);
             }
 
-            const todolists = await basecampFetch(credentialId, `/todosets/${todoset.id}/todolists.json`) as Array<Record<string, unknown>>;
+            const todolists = await basecampFetchAll(credentialId, `/todosets/${todoset.id}/todolists.json`);
             return reply.send(
                 todolists.map((tl) => ({
                     id:   tl.id,
@@ -72,38 +106,92 @@ export async function basecampDataRoutes(
         }
     );
 
-    fastify.get<{ Querystring: { credentialId: string; todolistId: string; completed?: string } }>(
+    fastify.get<{ Querystring: { credentialId: string; todolistId: string; status?: string } }>(
         '/basecamp/todos',
         async (request, reply) => {
-            const { credentialId, todolistId, completed } = request.query;
+            const { credentialId, todolistId, status } = request.query;
             if (!credentialId) return reply.badRequest('credentialId is required');
             if (!todolistId)   return reply.badRequest('todolistId is required');
 
-            const queryStr = completed === 'true' ? '?completed=true' : '';
-            const todos = await basecampFetch(credentialId, `/todolists/${todolistId}/todos.json${queryStr}`) as Array<Record<string, unknown>>;
+            // Determine which statuses to fetch: 'active' (default), 'completed', or 'all'
+            const fetchActive    = status !== 'completed';
+            const fetchCompleted = status === 'completed' || status === 'all';
+
+            async function fetchTodosForList(listId: string | number, suffix?: string): Promise<Array<Record<string, unknown>>> {
+                const gIdStr    = String(listId);
+                const gName     = suffix ?? null;
+                const results: Array<Record<string, unknown>> = [];
+
+                if (fetchActive) {
+                    const active = await basecampFetchAll(credentialId, `/todolists/${gIdStr}/todos.json`);
+                    results.push(...active.map((t): Record<string, unknown> => ({ ...t, _groupId: gName ? listId : null, _groupName: gName })));
+                }
+                if (fetchCompleted) {
+                    const done = await basecampFetchAll(credentialId, `/todolists/${gIdStr}/todos.json?completed=true`);
+                    results.push(...done.map((t): Record<string, unknown> => ({ ...t, _groupId: gName ? listId : null, _groupName: gName })));
+                }
+                return results;
+            }
+
+            // Fetch ungrouped (top-level) to-dos
+            const topLevelTodos = await fetchTodosForList(todolistId);
+
+            // Fetch groups, then to-dos inside each group
+            const groups = await basecampFetchAll(credentialId, `/todolists/${todolistId}/groups.json`);
+            const groupedArrays = await Promise.all(
+                groups.map((g) => fetchTodosForList(g.id as number, (g.name ?? g.title ?? 'Unnamed Group') as string))
+            );
+            const groupedTodos = groupedArrays.flat();
+
+            const allTodos: Array<Record<string, unknown>> = [...topLevelTodos, ...groupedTodos];
             return reply.send(
-                todos.map((t) => ({
+                allTodos.map((t) => ({
                     id:        t.id,
                     title:     t.title ?? t.content,
                     completed: t.completed,
                     dueOn:     t.due_on ?? null,
+                    groupId:   t._groupId ?? null,
+                    groupName: t._groupName ?? null,
                 }))
             );
         }
     );
 
-    fastify.get<{ Querystring: { credentialId: string } }>(
+    /** List groups (sections) within a to-do list */
+    fastify.get<{ Querystring: { credentialId: string; todolistId: string } }>(
+        '/basecamp/todogroups',
+        async (request, reply) => {
+            const { credentialId, todolistId } = request.query;
+            if (!credentialId) return reply.badRequest('credentialId is required');
+            if (!todolistId)   return reply.badRequest('todolistId is required');
+
+            const groups = await basecampFetchAll(credentialId, `/todolists/${todolistId}/groups.json`);
+            return reply.send(
+                groups.map((g) => ({
+                    id:   g.id,
+                    name: g.name ?? g.title,
+                }))
+            );
+        }
+    );
+
+    fastify.get<{ Querystring: { credentialId: string; projectId?: string } }>(
         '/basecamp/people',
         async (request, reply) => {
-            const { credentialId } = request.query;
+            const { credentialId, projectId } = request.query;
             if (!credentialId) return reply.badRequest('credentialId is required');
 
-            const people = await basecampFetch(credentialId, '/people.json') as Array<Record<string, unknown>>;
+            const path = projectId
+                ? `/projects/${projectId}/people.json`
+                : '/people.json';
+
+            const people = await basecampFetchAll(credentialId, path);
             return reply.send(
                 people.map((p) => ({
                     id:    p.id,
                     name:  p.name,
                     email: p.email_address ?? '',
+                    company: (p.company as Record<string, unknown>)?.name ?? null,
                 }))
             );
         }

@@ -3,6 +3,7 @@ import {
   listBasecampProjects,
   listBasecampTodolists,
   listBasecampTodos,
+  listBasecampTodoGroups,
   listBasecampPeople,
 } from '../api/client';
 
@@ -26,20 +27,30 @@ export function useBasecampTodolists(credentialId: string, projectId: string) {
   });
 }
 
-export function useBasecampTodos(credentialId: string, todolistId: string) {
+export function useBasecampTodos(credentialId: string, todolistId: string, status: 'active' | 'all' = 'active') {
   return useQuery({
-    queryKey:  ['basecamp-todos', credentialId, todolistId],
-    queryFn:   () => listBasecampTodos(credentialId, todolistId),
+    queryKey:  ['basecamp-todos', credentialId, todolistId, status],
+    queryFn:   () => listBasecampTodos(credentialId, todolistId, status),
     enabled:   !!credentialId && !!todolistId,
     staleTime: 5 * 60 * 1000,
     retry:     false,
   });
 }
 
-export function useBasecampPeople(credentialId: string) {
+export function useBasecampTodoGroups(credentialId: string, todolistId: string) {
   return useQuery({
-    queryKey:  ['basecamp-people', credentialId],
-    queryFn:   () => listBasecampPeople(credentialId),
+    queryKey:  ['basecamp-todogroups', credentialId, todolistId],
+    queryFn:   () => listBasecampTodoGroups(credentialId, todolistId),
+    enabled:   !!credentialId && !!todolistId,
+    staleTime: 5 * 60 * 1000,
+    retry:     false,
+  });
+}
+
+export function useBasecampPeople(credentialId: string, projectId?: string) {
+  return useQuery({
+    queryKey:  ['basecamp-people', credentialId, projectId ?? ''],
+    queryFn:   () => listBasecampPeople(credentialId, projectId),
     enabled:   !!credentialId,
     staleTime: 5 * 60 * 1000,
     retry:     false,

@@ -275,12 +275,20 @@ export interface BasecampTodo {
   title: string;
   completed: boolean;
   dueOn: string | null;
+  groupId: number | null;
+  groupName: string | null;
+}
+
+export interface BasecampTodoGroup {
+  id: number;
+  name: string;
 }
 
 export interface BasecampPerson {
   id: number;
   name: string;
   email: string;
+  company: string | null;
 }
 
 export function listBasecampProjects(credentialId: string) {
@@ -293,12 +301,20 @@ export function listBasecampTodolists(credentialId: string, projectId: string) {
   );
 }
 
-export function listBasecampTodos(credentialId: string, todolistId: string) {
+export function listBasecampTodos(credentialId: string, todolistId: string, status: 'active' | 'all' = 'active') {
   return request<BasecampTodo[]>(
-    `/basecamp/todos?credentialId=${encodeURIComponent(credentialId)}&todolistId=${encodeURIComponent(todolistId)}`
+    `/basecamp/todos?credentialId=${encodeURIComponent(credentialId)}&todolistId=${encodeURIComponent(todolistId)}&status=${status}`
   );
 }
 
-export function listBasecampPeople(credentialId: string) {
-  return request<BasecampPerson[]>(`/basecamp/people?credentialId=${encodeURIComponent(credentialId)}`);
+export function listBasecampTodoGroups(credentialId: string, todolistId: string) {
+  return request<BasecampTodoGroup[]>(
+    `/basecamp/todogroups?credentialId=${encodeURIComponent(credentialId)}&todolistId=${encodeURIComponent(todolistId)}`
+  );
+}
+
+export function listBasecampPeople(credentialId: string, projectId?: string) {
+  let url = `/basecamp/people?credentialId=${encodeURIComponent(credentialId)}`;
+  if (projectId) url += `&projectId=${encodeURIComponent(projectId)}`;
+  return request<BasecampPerson[]>(url);
 }

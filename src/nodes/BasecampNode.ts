@@ -18,6 +18,7 @@ interface BasecampConfig {
     action: BasecampAction;
     projectId?: string;
     todolistId?: string;
+    groupId?: string;
     todoId?: string;
     recordingId?: string;
     // create_todo
@@ -29,6 +30,7 @@ interface BasecampConfig {
     subject?: string;
     // list_todos
     completed?: boolean;
+    includeCompleted?: boolean;
     // shared
     text?: string;
 }
@@ -60,6 +62,7 @@ export class BasecampNode implements NodeExecutor {
 
         if (action === 'create_todo') {
             const todolistId = this.resolver.resolveTemplate(config.todolistId ?? '', context);
+            const groupId    = this.resolver.resolveTemplate(config.groupId ?? '', context);
             const content    = this.resolver.resolveTemplate(config.content ?? '', context);
             if (!todolistId) throw new Error('Basecamp create_todo: todolistId is required');
             if (!content)    throw new Error('Basecamp create_todo: content is required');
@@ -79,7 +82,9 @@ export class BasecampNode implements NodeExecutor {
                 body.notify = true;
             }
 
-            const res = await fetch(`${baseUrl}/todolists/${todolistId}/todos.json`, {
+            // Post to the group if specified, otherwise to the top-level to-do list
+            const targetId = groupId || todolistId;
+            const res = await fetch(`${baseUrl}/todolists/${targetId}/todos.json`, {
                 method: 'POST', headers, body: JSON.stringify(body),
             });
             if (!res.ok) throw new Error(`Basecamp create_todo failed (${res.status}): ${await res.text()}`);
@@ -158,22 +163,85 @@ export class BasecampNode implements NodeExecutor {
         }
 
         if (action === 'list_todos') {
-            const todolistId = this.resolver.resolveTemplate(config.todolistId ?? '', context);
+            const todolistId      = this.resolver.resolveTemplate(config.todolistId ?? '', context);
+            const groupId         = this.resolver.resolveTemplate(config.groupId ?? '', context);
+            const includeCompleted = Boolean(config.includeCompleted);
             if (!todolistId) throw new Error('Basecamp list_todos: todolistId is required');
 
-            const completedParam = config.completed ? '?completed=true' : '';
-            const res = await fetch(`${baseUrl}/todolists/${todolistId}/todos.json${completedParam}`, { headers });
-            if (!res.ok) throw new Error(`Basecamp list_todos failed (${res.status}): ${await res.text()}`);
-            const todos = await res.json() as Array<Record<string, unknown>>;
+            const suffixes = [''];
+            if (includeCompleted) suffixes.push('?completed=true');
+
+            // Paginated fetch that follows Basecamp's Link: <url>; rel="next" header
+            async function fetchAllPages(
+                startUrl: string,
+                hdrs: Record<string, string>,
+            ): Promise<Array<Record<string, unknown>>> {
+                const results: Array<Record<string, unknown>> = [];
+                let nextUrl: string | null = startUrl;
+                while (nextUrl) {
+                    const r: Response = await fetch(nextUrl, { headers: hdrs });
+                    if (!r.ok) break;
+                    const page = await r.json() as Array<Record<string, unknown>>;
+                    results.push(...page);
+                    const linkHeader: string = r.headers.get('Link') ?? '';
+                    const nextMatch: RegExpMatchArray | null = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+                    nextUrl = nextMatch ? nextMatch[1] : null;
+                }
+                return results;
+            }
+
+            async function fetchTodos(
+                url: string,
+                hdrs: Record<string, string>,
+                groupName?: string,
+            ): Promise<Array<Record<string, unknown>>> {
+                const results: Array<Record<string, unknown>> = [];
+                for (const qs of suffixes) {
+                    const items = await fetchAllPages(`${url}${qs}`, hdrs);
+                    results.push(...items.map((t) => (groupName ? { ...t, _groupName: groupName } : t)));
+                }
+                return results;
+            }
+
+            let allTodos: Array<Record<string, unknown>>;
+
+            if (groupId) {
+                const groups = await fetchAllPages(`${baseUrl}/todolists/${todolistId}/groups.json`, headers);
+                let groupName = 'Group';
+                const match = groups.find((g) => String(g.id) === groupId);
+                if (match) groupName = (match.name ?? match.title ?? 'Group') as string;
+                allTodos = await fetchTodos(
+                    `${baseUrl}/todolists/${groupId}/todos.json`, headers, groupName,
+                );
+            } else {
+                const topTodos = await fetchTodos(
+                    `${baseUrl}/todolists/${todolistId}/todos.json`, headers,
+                );
+
+                const groups = await fetchAllPages(`${baseUrl}/todolists/${todolistId}/groups.json`, headers);
+                const nested = await Promise.all(
+                    groups.map((g) =>
+                        fetchTodos(
+                            `${baseUrl}/todolists/${g.id}/todos.json`,
+                            headers,
+                            (g.name ?? g.title ?? 'Unnamed Group') as string,
+                        )
+                    )
+                );
+
+                allTodos = [...topTodos, ...nested.flat()];
+            }
+
             return {
-                todos: todos.map((t) => ({
+                todos: allTodos.map((t) => ({
                     id:        t.id,
                     title:     t.title ?? t.content,
                     completed: t.completed,
                     dueOn:     t.due_on,
+                    group:     (t as Record<string, unknown>)._groupName ?? null,
                     assignees: ((t.assignees as Array<{ id: number; name: string }>) ?? []).map((a) => ({ id: a.id, name: a.name })),
                 })),
-                count: todos.length,
+                count: allTodos.length,
             };
         }
 

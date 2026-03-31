@@ -98,43 +98,45 @@ export class BasecampAuthService {
         const identity = authData.identity as { first_name?: string; last_name?: string; email_address?: string } | undefined;
         const accounts = (authData.accounts as Array<{ product: string; id: number; name: string; href: string }>) ?? [];
 
-        const bc3Account = accounts.find((a) => a.product === 'bc3');
-        if (!bc3Account) {
+        const bc3Accounts = accounts.filter((a) => a.product === 'bc3');
+        if (bc3Accounts.length === 0) {
             throw new Error(
                 'No Basecamp 3/4 account found for this user. ' +
                 'Make sure the user has an active Basecamp account.'
             );
         }
 
-        const accountId = String(bc3Account.id);
         const userName  = identity
             ? `${identity.first_name ?? ''} ${identity.last_name ?? ''}`.trim() || 'Basecamp User'
             : 'Basecamp User';
         const userEmail = identity?.email_address ?? '';
 
-        const label = `${userName} — ${bc3Account.name}`;
-        // Store accountId:email so we can extract the accountId later
-        const upsertKey = `${accountId}:${userEmail}`;
-
         const existing = await this.credentialRepo.findAll();
-        const match = existing.find((c) => c.provider === 'basecamp' && c.email === upsertKey);
 
-        if (match) {
-            await this.credentialRepo.updateTokens(match.id, {
-                accessToken,
-                refreshToken,
-                expiryDate,
-            });
-        } else {
-            await this.credentialRepo.create({
-                provider:     'basecamp',
-                label,
-                email:        upsertKey,
-                accessToken,
-                refreshToken,
-                expiryDate,
-                scopes:       [],
-            });
+        for (const bc3Account of bc3Accounts) {
+            const accountId = String(bc3Account.id);
+            const label     = `${userName} — ${bc3Account.name}`;
+            const upsertKey = `${accountId}:${userEmail}`;
+
+            const match = existing.find((c) => c.provider === 'basecamp' && c.email === upsertKey);
+
+            if (match) {
+                await this.credentialRepo.updateTokens(match.id, {
+                    accessToken,
+                    refreshToken,
+                    expiryDate,
+                });
+            } else {
+                await this.credentialRepo.create({
+                    provider:     'basecamp',
+                    label,
+                    email:        upsertKey,
+                    accessToken,
+                    refreshToken,
+                    expiryDate,
+                    scopes:       [],
+                });
+            }
         }
 
         return { name: userName, email: userEmail };
