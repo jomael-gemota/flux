@@ -112,10 +112,7 @@ export async function teamsDataRoutes(
                         ? await client.api(nextLink).get() as { value: Array<Record<string, unknown>>; '@odata.nextLink'?: string }
                         : await client
                             .api('/users')
-                            .header('ConsistencyLevel', 'eventual')
-                            .query('$count=true')
                             .select('id,displayName,mail,userPrincipalName')
-                            .filter('accountEnabled eq true')
                             .top(100)
                             .get() as { value: Array<Record<string, unknown>>; '@odata.nextLink'?: string };
 

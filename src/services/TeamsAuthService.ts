@@ -91,15 +91,16 @@ export class TeamsAuthService {
             }
         );
 
-        if (!tokenRes.ok) {
-            throw new Error(`Teams token exchange failed: ${tokenRes.statusText}`);
-        }
-
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const tokenData = await tokenRes.json() as Record<string, any>;
 
-        if (tokenData.error) {
-            throw new Error(`Teams OAuth error: ${tokenData.error_description ?? tokenData.error}`);
+        if (!tokenRes.ok || tokenData.error) {
+            const desc = (tokenData.error_description as string)
+                ?? (tokenData.error as string)
+                ?? tokenRes.statusText;
+            throw new Error(
+                `Teams token exchange failed (${tokenRes.status}): ${desc}`
+            );
         }
 
         const accessToken  = tokenData.access_token  as string;
@@ -129,6 +130,7 @@ export class TeamsAuthService {
                 accessToken,
                 refreshToken,
                 expiryDate,
+                scopes: TEAMS_SCOPES.split(' '),
             });
         } else {
             await this.credentialRepo.create({
@@ -143,6 +145,12 @@ export class TeamsAuthService {
         }
 
         return { displayName, email };
+    }
+
+    /** Returns true when the stored credential includes the given Graph scope. */
+    async hasScope(credentialId: string, scope: string): Promise<boolean> {
+        const cred = await this.credentialRepo.findById(credentialId);
+        return cred?.scopes.includes(scope) ?? false;
     }
 
     /**
@@ -195,15 +203,16 @@ export class TeamsAuthService {
             }
         );
 
-        if (!res.ok) {
-            throw new Error(`Teams token refresh failed: ${res.statusText}`);
-        }
-
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = await res.json() as Record<string, any>;
 
-        if (data.error) {
-            throw new Error(`Teams token refresh error: ${data.error_description ?? data.error}`);
+        if (!res.ok || data.error) {
+            const desc = (data.error_description as string)
+                ?? (data.error as string)
+                ?? res.statusText;
+            throw new Error(
+                `Teams token refresh failed (${res.status}): ${desc}`
+            );
         }
 
         const newAccessToken  = data.access_token  as string;

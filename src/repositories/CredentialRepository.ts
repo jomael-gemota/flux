@@ -13,6 +13,7 @@ export interface CredentialTokens {
     accessToken: string;
     refreshToken: string;
     expiryDate: number;
+    scopes?: string[];
 }
 
 export class CredentialRepository {
@@ -44,6 +45,7 @@ export class CredentialRepository {
                 accessToken:  tokens.accessToken,
                 refreshToken: tokens.refreshToken,
                 expiryDate:   tokens.expiryDate,
+                ...(tokens.scopes ? { scopes: tokens.scopes } : {}),
             },
         });
     }
