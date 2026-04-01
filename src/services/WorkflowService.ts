@@ -16,7 +16,8 @@ export class WorkflowService {
     async trigger(
         workflowId: string,
         input: Record<string, unknown>,
-        triggeredBy: 'api' | 'webhook' | 'replay' | 'manual' = 'api'
+        triggeredBy: 'api' | 'webhook' | 'replay' | 'manual' | 'schedule' = 'api',
+        triggerNodeId?: string,
     ): Promise<ExecutionSummary> {
         const workflow = await this.workflowRepo.findById(workflowId);
         if (!workflow) throw new Error(`Workflow ${workflowId} not found`);
@@ -38,7 +39,7 @@ export class WorkflowService {
         if (process.env.REDIS_URL) {
             try {
                 const queue = getWorkflowQueue();
-                await queue.add('run', { executionId, workflowId, input, triggeredBy });
+                await queue.add('run', { executionId, workflowId, input, triggeredBy, triggerNodeId });
 
                 return {
                     executionId,
@@ -57,7 +58,7 @@ export class WorkflowService {
         await this.executionRepo.markRunning(executionId);
 
         try {
-            const result = await this.runner.run(workflow, input);
+            const result = await this.runner.run(workflow, input, triggerNodeId);
             const completedAt = new Date();
 
             const hasFailure = result.results.some(r => r.status === 'failure');

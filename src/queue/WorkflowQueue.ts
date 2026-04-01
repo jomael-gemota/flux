@@ -5,7 +5,8 @@ export interface WorkflowJobData {
     executionId: string;
     workflowId: string;
     input: Record<string, unknown>;
-    triggeredBy: 'api' | 'webhook' | 'replay' | 'manual';
+    triggeredBy: 'api' | 'webhook' | 'replay' | 'manual' | 'schedule';
+    triggerNodeId?: string;
 }
 
 export const WORKFLOW_QUEUE_NAME = 'workflow-jobs';

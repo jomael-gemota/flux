@@ -8,7 +8,11 @@ import { SwitchNodeOutput } from '../nodes/SwitchNode';
 export class WorkflowRunner {
     constructor(private registry: NodeExecutorRegistry) {}
 
-    async run(workflow: WorkflowDefinition, input: unknown): Promise<WorkflowExecutionResult> {
+    async run(
+        workflow: WorkflowDefinition,
+        input: unknown,
+        triggerNodeId?: string,
+    ): Promise<WorkflowExecutionResult> {
         const context: ExecutionContext = {
             workflowId: workflow.id,
             executionId: crypto.randomUUID(),
@@ -18,10 +22,13 @@ export class WorkflowRunner {
 
         const results: NodeResult[] = [];
 
-        // Resolve which nodes are entry points (support multiple parallel starts)
-        const entryIds = (workflow.entryNodeIds?.length
-            ? workflow.entryNodeIds
-            : [workflow.entryNodeId]
+        // When a specific trigger node fired, use it as the sole entry point;
+        // otherwise fall back to the workflow's configured entry nodes.
+        const entryIds = (triggerNodeId
+            ? [triggerNodeId]
+            : (workflow.entryNodeIds?.length
+                ? workflow.entryNodeIds
+                : [workflow.entryNodeId])
         ).filter(Boolean);
 
         // Pre-compute in-degree for fan-in (join) logic.

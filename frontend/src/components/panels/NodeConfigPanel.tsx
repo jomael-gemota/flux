@@ -1,5 +1,5 @@
-import { Settings2, Star, Braces, Play, Loader2, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Clock, Copy, Check, ArrowRight, Power, X, AlertTriangle } from 'lucide-react';
-import { useRef, useState, useEffect } from 'react';
+import { Settings2, Star, Braces, Play, Loader2, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Clock, Copy, Check, ArrowRight, Power, X, AlertTriangle, Save } from 'lucide-react';
+import { useRef, useState, useEffect, useMemo } from 'react';
 import { useWorkflowStore } from '../../store/workflowStore';
 import type { CanvasNode } from '../../store/workflowStore';
 import { Select } from '../ui/Input';
@@ -20,7 +20,14 @@ interface OutputField {
 }
 
 const NODE_OUTPUT_FIELDS: Record<string, OutputField[]> = {
-  trigger: [{ key: 'payload', label: 'Trigger payload (full input)' }],
+  trigger: [
+    { key: 'triggerType', label: 'Trigger type (manual/webhook/cron/…)' },
+    { key: 'triggeredAt', label: 'Trigger timestamp (ISO)' },
+    { key: 'body', label: 'Request body (webhook)' },
+    { key: 'headers', label: 'Request headers (webhook)' },
+    { key: 'query', label: 'Query params (webhook)' },
+    { key: 'scheduledAt', label: 'Scheduled time (cron)' },
+  ],
   http: [
     { key: 'status', label: 'HTTP status code' },
     { key: 'body', label: 'Full response body (JSON)' },
@@ -1016,11 +1023,45 @@ function DisableNodeWarningModal({
 
 // ── Main panel ────────────────────────────────────────────────────────────────
 
+interface NodeDraft {
+  label: string;
+  config: Record<string, unknown>;
+  retries: number | undefined;
+  retryDelayMs: number | undefined;
+  timeoutMs: number | undefined;
+}
+
 export function NodeConfigPanel() {
-  const { nodes, selectedNodeId, setNodes, activeWorkflow, setActiveWorkflow } =
+  const { nodes, selectedNodeId, setNodes, setSelectedNodeId, setDirty, activeWorkflow, setActiveWorkflow } =
     useWorkflowStore();
 
   const { save: saveWorkflow, isSaving: isSavingDisabled } = useSaveWorkflow();
+
+  // ── Local draft — buffers config changes until the user explicitly saves ─────
+  const [draft, setDraft] = useState<NodeDraft | null>(null);
+  // originalSnapshot is a STATE (not a ref) so updating it after save
+  // triggers a re-render and isDirtyLocal correctly recomputes to false.
+  const [originalSnapshot, setOriginalSnapshot] = useState<NodeDraft | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isSavingNode, setIsSavingNode] = useState(false);
+
+  // Reset draft whenever a different node is selected
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const node = nodes.find((n) => n.id === selectedNodeId);
+    if (!node) { setDraft(null); setOriginalSnapshot(null); return; }
+    const snapshot: NodeDraft = {
+      label: node.data.label,
+      config: { ...(node.data.config as Record<string, unknown>) },
+      retries: node.data.retries,
+      retryDelayMs: node.data.retryDelayMs,
+      timeoutMs: node.data.timeoutMs,
+    };
+    setOriginalSnapshot({ ...snapshot, config: { ...snapshot.config } });
+    setDraft({ ...snapshot, config: { ...snapshot.config } });
+    setSaveSuccess(false);
+    setIsSavingNode(false);
+  }, [selectedNodeId]); // intentionally omits `nodes` — only reset on selection change
 
   // State for the disable-confirmation modal (must be before any early return)
   const [disableModal, setDisableModal] = useState<{ open: boolean; dependents: CanvasNode[] }>({
@@ -1032,6 +1073,19 @@ export function NodeConfigPanel() {
   const { data: testResults = {} } = useNodeTestResults(
     isUnsaved ? null : activeWorkflow?.id
   );
+
+  // ── isDirtyLocal must be declared BEFORE the early return so hook order is stable ──
+  // Depends on both `draft` AND `originalSnapshot` so it recomputes when either changes.
+  const isDirtyLocal = useMemo(() => {
+    if (!draft || !originalSnapshot) return false;
+    return (
+      draft.label !== originalSnapshot.label ||
+      JSON.stringify(draft.config) !== JSON.stringify(originalSnapshot.config) ||
+      draft.retries !== originalSnapshot.retries ||
+      draft.retryDelayMs !== originalSnapshot.retryDelayMs ||
+      draft.timeoutMs !== originalSnapshot.timeoutMs
+    );
+  }, [draft, originalSnapshot]);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
@@ -1048,12 +1102,7 @@ export function NodeConfigPanel() {
   const nodeType = data.nodeType as string;
 
   function updateConfig(patch: Record<string, unknown>) {
-    const updated = nodes.map((n) =>
-      n.id === selectedNodeId
-        ? { ...n, data: { ...n.data, config: { ...n.data.config, ...patch } } }
-        : n
-    );
-    setNodes(updated);
+    setDraft((prev) => prev ? { ...prev, config: { ...prev.config, ...patch } } : prev);
   }
 
   function updateData(patch: Partial<typeof data>) {
@@ -1118,19 +1167,74 @@ export function NodeConfigPanel() {
     }
   }
 
+  async function handleNodeSave() {
+    if (!draft) return;
+    setIsSavingNode(true);
+
+    // Commit draft values into the global store
+    setNodes(nodes.map((n) =>
+      n.id === selectedNodeId
+        ? {
+            ...n,
+            data: {
+              ...n.data,
+              label: draft.label,
+              config: draft.config,
+              retries: draft.retries ?? 0,
+              retryDelayMs: draft.retryDelayMs ?? 0,
+              timeoutMs: draft.timeoutMs,
+            },
+          }
+        : n
+    ));
+    // Immediately clear the global dirty flag so the Toolbar "Save Workflow"
+    // button doesn't flicker active during the async save below.
+    setDirty(false);
+
+    try {
+      await saveWorkflow();
+      // Update the original snapshot → isDirtyLocal recomputes to false
+      setOriginalSnapshot({ ...draft, config: { ...draft.config } });
+      setSaveSuccess(true);
+      setIsSavingNode(false);
+      setTimeout(() => setSaveSuccess(false), 2500);
+    } catch (err) {
+      setIsSavingNode(false);
+      alert(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  function handleNodeCancel() {
+    // Reset draft to last-saved snapshot, then deselect / close the config panel
+    if (originalSnapshot) {
+      setDraft({ ...originalSnapshot, config: { ...originalSnapshot.config } });
+    }
+    setSelectedNodeId(null);
+  }
+
   const entryCount = nodes.filter(n => n.data.isEntry).length;
-  const cfg = data.config as Record<string, unknown>;
+  // Use draft config for the form; fall back to store until draft is initialised
+  const cfg = (draft?.config ?? data.config) as Record<string, unknown>;
   const otherNodes = nodes.filter((n) => n.id !== selectedNodeId);
   const savedTestResult = selectedNodeId ? (testResults[selectedNodeId] ?? null) : null;
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="flex flex-col min-h-full">
+    {/* Scrollable config body */}
+    <div className="p-4 space-y-4 flex-1">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="min-w-0 flex-1 mr-2">
-          <p className="text-[10px] text-slate-500 uppercase tracking-wider">{nodeType}</p>
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+            {nodeType}
+            {isDirtyLocal && (
+              <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                ● unsaved
+              </span>
+            )}
+          </p>
           <p className={`text-sm font-semibold truncate ${data.disabled ? 'text-slate-500 line-through' : 'text-white'}`}>
-            {data.label}
+            {draft?.label ?? data.label}
           </p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -1188,8 +1292,8 @@ export function NodeConfigPanel() {
         <label className="block text-xs font-medium text-slate-400">Node name</label>
         <input
           type="text"
-          value={data.label}
-          onChange={(e) => updateData({ label: e.target.value })}
+          value={draft?.label ?? data.label}
+          onChange={(e) => setDraft((prev) => prev ? { ...prev, label: e.target.value } : prev)}
           className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
         />
       </div>
@@ -1252,14 +1356,17 @@ export function NodeConfigPanel() {
       {nodeType === 'basecamp' && (
         <BasecampConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
       )}
+      {nodeType === 'trigger' && (
+        <TriggerConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} workflowId={activeWorkflow?.id ?? ''} nodeId={selectedNode.id} />
+      )}
 
       {/* Retry & Timeout */}
       <div className="border-t border-slate-700" />
       <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Retry & Timeout</p>
       {[
-        { label: 'Retries (0–5)', key: 'retries', min: 0, max: 5, val: data.retries ?? 0 },
-        { label: 'Retry delay (ms)', key: 'retryDelayMs', min: 0, val: data.retryDelayMs ?? 0 },
-        { label: 'Timeout (ms, 0 = none)', key: 'timeoutMs', min: 0, val: data.timeoutMs ?? 0 },
+        { label: 'Retries (0–5)', key: 'retries' as const, min: 0, max: 5, val: draft?.retries ?? 0 },
+        { label: 'Retry delay (ms)', key: 'retryDelayMs' as const, min: 0, val: draft?.retryDelayMs ?? 0 },
+        { label: 'Timeout (ms, 0 = none)', key: 'timeoutMs' as const, min: 0, val: draft?.timeoutMs ?? 0 },
       ].map(({ label, key, min, max, val }) => (
         <div key={key} className="space-y-1">
           <label className="block text-xs font-medium text-slate-400">{label}</label>
@@ -1269,11 +1376,12 @@ export function NodeConfigPanel() {
             max={max}
             value={String(val)}
             onChange={(e) =>
-              updateData({
+              setDraft((prev) => prev ? {
+                ...prev,
                 [key]: key === 'timeoutMs'
                   ? (Number(e.target.value) || undefined)
                   : Number(e.target.value),
-              })
+              } : prev)
             }
             className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
           />
@@ -1290,6 +1398,40 @@ export function NodeConfigPanel() {
         onConfirm={confirmDisable}
         onCancel={() => setDisableModal({ open: false, dependents: [] })}
       />
+    </div>
+
+    {/* ── Sticky Save / Cancel footer ─────────────────────────────────────── */}
+    <div className="sticky bottom-0 z-10 bg-slate-900/95 backdrop-blur-sm border-t border-slate-700/70 px-4 py-3 flex items-center gap-2 shrink-0">
+      <button
+        onClick={handleNodeSave}
+        disabled={!isDirtyLocal || isSavingNode}
+        title={isDirtyLocal ? 'Save changes to this node' : 'No changes to save'}
+        className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-xs font-semibold transition-all duration-150 ${
+          saveSuccess
+            ? 'bg-green-600/80 text-white cursor-default'
+            : isDirtyLocal && !isSavingNode
+            ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-sm shadow-blue-900/50'
+            : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+        }`}
+      >
+        {isSavingNode ? (
+          <><Loader2 className="w-3 h-3 animate-spin" /> Saving…</>
+        ) : saveSuccess ? (
+          <><CheckCircle2 className="w-3 h-3" /> Saved</>
+        ) : (
+          <><Save className="w-3 h-3" /> Save</>
+        )}
+      </button>
+
+      <button
+        onClick={handleNodeCancel}
+        title={isDirtyLocal ? 'Discard changes and close' : 'Close config panel'}
+        className="flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-700/60 transition-colors"
+      >
+        <X className="w-3 h-3" />
+        {isDirtyLocal ? 'Discard' : 'Close'}
+      </button>
+    </div>
     </div>
   );
 }
@@ -3169,6 +3311,281 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
           <label htmlFor="basecamp-include-completed" className="text-xs text-slate-400">
             Include completed to-dos (including hidden)
           </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── TriggerConfig ────────────────────────────────────────────────────────────
+
+const TRIGGER_TYPE_OPTIONS = [
+  { value: 'manual',    label: 'Manual' },
+  { value: 'webhook',   label: 'Webhook' },
+  { value: 'cron',      label: 'Schedule / Cron' },
+  { value: 'app_event', label: 'App Event' },
+  { value: 'email',     label: 'Email (Gmail)' },
+];
+
+const WEBHOOK_METHOD_OPTIONS = ['POST', 'GET', 'PUT'].map((m) => ({ value: m, label: m }));
+
+const APP_EVENT_APP_OPTIONS = [
+  { value: '', label: 'Select an app…' },
+  { value: 'basecamp', label: 'Basecamp' },
+  { value: 'slack',    label: 'Slack' },
+  { value: 'teams',    label: 'Microsoft Teams' },
+  { value: 'gmail',    label: 'Gmail' },
+];
+
+const APP_EVENT_TYPE_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  basecamp: [
+    { value: '', label: 'Select an event…' },
+    { value: 'new_todo',     label: 'New To-Do created' },
+    { value: 'new_message',  label: 'New Message posted' },
+    { value: 'new_comment',  label: 'New Comment posted' },
+    { value: 'todo_completed', label: 'To-Do completed' },
+  ],
+  slack: [
+    { value: '', label: 'Select an event…' },
+    { value: 'new_message',  label: 'New message in channel' },
+    { value: 'new_reaction', label: 'New reaction added' },
+  ],
+  teams: [
+    { value: '', label: 'Select an event…' },
+    { value: 'new_message',  label: 'New message in channel' },
+  ],
+  gmail: [
+    { value: '', label: 'Select an event…' },
+    { value: 'new_email', label: 'New email received' },
+  ],
+};
+
+const CRON_PRESETS = [
+  { value: '',                 label: 'Choose a preset…' },
+  { value: '* * * * *',       label: 'Every minute' },
+  { value: '*/5 * * * *',     label: 'Every 5 minutes' },
+  { value: '*/15 * * * *',    label: 'Every 15 minutes' },
+  { value: '0 * * * *',       label: 'Every hour' },
+  { value: '0 0 * * *',       label: 'Every day at midnight' },
+  { value: '0 9 * * *',       label: 'Every day at 9:00 AM' },
+  { value: '0 9 * * 1-5',     label: 'Every weekday at 9 AM' },
+  { value: '0 9 * * 1',       label: 'Every Monday at 9 AM' },
+  { value: '0 0 1 * *',       label: 'First of month at midnight' },
+];
+
+const LABEL_FILTER_OPTIONS = [
+  { value: 'INBOX',     label: 'Inbox' },
+  { value: 'UNREAD',    label: 'Unread' },
+  { value: 'STARRED',   label: 'Starred' },
+  { value: 'IMPORTANT', label: 'Important' },
+];
+
+function describeCron(expr: string): string {
+  const preset = CRON_PRESETS.find((p) => p.value === expr);
+  return preset?.label ?? '';
+}
+
+function TriggerConfig({
+  cfg,
+  onChange,
+  workflowId,
+  nodeId,
+}: ConfigProps & { workflowId: string; nodeId: string }) {
+  const triggerType = (cfg.triggerType as string) || 'manual';
+  const credentials = useCredentialList();
+
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const webhookUrl = workflowId && nodeId
+    ? `${baseUrl}/webhooks/${workflowId}/trigger/${nodeId}`
+    : '';
+
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
+
+  const credentialOptions = (provider: string) => {
+    const filtered = (credentials.data ?? []).filter((c) => {
+      if (provider === 'gmail') return c.provider === 'google';
+      return c.provider === provider;
+    });
+    return [
+      { value: '', label: 'Select credential…' },
+      ...filtered.map((c) => ({ value: c.id, label: c.label || c.provider })),
+    ];
+  };
+
+  return (
+    <div className="space-y-3">
+      <Select
+        label="Trigger Type"
+        value={triggerType}
+        onChange={(e) => onChange({ triggerType: e.target.value })}
+        options={TRIGGER_TYPE_OPTIONS}
+      />
+
+      {/* ── Manual ── */}
+      {triggerType === 'manual' && (
+        <div className="bg-slate-800/50 rounded-lg p-3 space-y-1">
+          <p className="text-xs text-slate-400">
+            Click <span className="font-semibold text-purple-400">Run</span> or use the{' '}
+            <span className="font-semibold text-purple-400">Test This Node</span> button to trigger this workflow manually.
+          </p>
+        </div>
+      )}
+
+      {/* ── Webhook ── */}
+      {triggerType === 'webhook' && (
+        <div className="space-y-3">
+          <Select
+            label="HTTP Method"
+            value={(cfg.webhookMethod as string) || 'POST'}
+            onChange={(e) => onChange({ webhookMethod: e.target.value })}
+            options={WEBHOOK_METHOD_OPTIONS}
+          />
+
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-400">Webhook URL</label>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                readOnly
+                value={webhookUrl || 'Save workflow first to generate URL'}
+                className="flex-1 rounded-md bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs text-slate-300 font-mono select-all"
+              />
+              {webhookUrl && (
+                <button
+                  type="button"
+                  className="p-1.5 rounded hover:bg-slate-700 text-slate-400"
+                  onClick={() => {
+                    navigator.clipboard.writeText(webhookUrl);
+                    setCopiedWebhook(true);
+                    setTimeout(() => setCopiedWebhook(false), 2000);
+                  }}
+                >
+                  {copiedWebhook ? <Check size={13} className="text-green-400" /> : <Copy size={13} />}
+                </button>
+              )}
+            </div>
+            {webhookUrl && (
+              <p className="text-[10px] text-slate-500">
+                Send a {(cfg.webhookMethod as string) || 'POST'} request to this URL to trigger the workflow.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Cron / Schedule ── */}
+      {triggerType === 'cron' && (
+        <div className="space-y-3">
+          <Select
+            label="Preset"
+            value=""
+            onChange={(e) => { if (e.target.value) onChange({ cronExpression: e.target.value }); }}
+            options={CRON_PRESETS}
+          />
+
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-400">Cron Expression</label>
+            <input
+              type="text"
+              value={(cfg.cronExpression as string) || ''}
+              onChange={(e) => onChange({ cronExpression: e.target.value })}
+              placeholder="* * * * *"
+              className="w-full rounded-md bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs text-white font-mono placeholder-slate-600"
+            />
+            {Boolean(cfg.cronExpression) && (
+              <p className="text-[10px] text-slate-500">
+                {describeCron(cfg.cronExpression as string) || 'Custom expression'}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-400">Timezone (optional)</label>
+            <input
+              type="text"
+              value={(cfg.cronTimezone as string) || ''}
+              onChange={(e) => onChange({ cronTimezone: e.target.value })}
+              placeholder="e.g. America/New_York"
+              className="w-full rounded-md bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs text-white placeholder-slate-600"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── App Event ── */}
+      {triggerType === 'app_event' && (
+        <div className="space-y-3">
+          <Select
+            label="App"
+            value={(cfg.appType as string) || ''}
+            onChange={(e) => onChange({ appType: e.target.value, eventType: '', credentialId: '' })}
+            options={APP_EVENT_APP_OPTIONS}
+          />
+
+          {Boolean(cfg.appType) && (
+            <>
+              <Select
+                label="Event"
+                value={(cfg.eventType as string) || ''}
+                onChange={(e) => onChange({ eventType: e.target.value })}
+                options={APP_EVENT_TYPE_OPTIONS[cfg.appType as string] ?? [{ value: '', label: 'Select an event…' }]}
+              />
+
+              <Select
+                label="Credential"
+                value={(cfg.credentialId as string) || ''}
+                onChange={(e) => onChange({ credentialId: e.target.value })}
+                options={credentialOptions(cfg.appType as string)}
+              />
+
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-slate-400">
+                  Poll Interval (minutes)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={1440}
+                  value={(cfg.pollIntervalMinutes as number) || 5}
+                  onChange={(e) => onChange({ pollIntervalMinutes: Number(e.target.value) })}
+                  className="w-full rounded-md bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs text-white"
+                />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Email (Gmail) ── */}
+      {triggerType === 'email' && (
+        <div className="space-y-3">
+          <Select
+            label="Gmail Credential"
+            value={(cfg.credentialId as string) || ''}
+            onChange={(e) => onChange({ credentialId: e.target.value })}
+            options={credentialOptions('gmail')}
+          />
+
+          <Select
+            label="Label Filter"
+            value={(cfg.labelFilter as string) || 'INBOX'}
+            onChange={(e) => onChange({ labelFilter: e.target.value })}
+            options={LABEL_FILTER_OPTIONS}
+          />
+
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-400">
+              Poll Interval (minutes)
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={1440}
+              value={(cfg.pollIntervalMinutes as number) || 5}
+              onChange={(e) => onChange({ pollIntervalMinutes: Number(e.target.value) })}
+              className="w-full rounded-md bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs text-white"
+            />
+          </div>
         </div>
       )}
     </div>

@@ -14,14 +14,14 @@ export function createWorkflowWorker(
     const worker = new Worker<WorkflowJobData>(
         WORKFLOW_QUEUE_NAME,
         async (job: Job<WorkflowJobData>) => {
-            const { executionId, workflowId, input } = job.data;
+            const { executionId, workflowId, input, triggerNodeId } = job.data;
 
             const workflow = await workflowRepo.findById(workflowId);
             if (!workflow) throw new Error(`Workflow ${workflowId} not found`);
 
             await executionRepo.markRunning(executionId);
 
-            const { results } = await runner.run(workflow, input);
+            const { results } = await runner.run(workflow, input, triggerNodeId);
 
             const hasFailure = results.some(r => r.status === 'failure');
             const hasSuccess = results.some(r => r.status === 'success');

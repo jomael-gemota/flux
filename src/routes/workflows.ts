@@ -4,6 +4,7 @@ import { WorkflowService } from '../services/WorkflowService';
 import { WorkflowRepository } from '../repositories/WorkflowRepository';
 import { ExecutionRepository } from '../repositories/ExecutionRepository';
 import { NodeExecutorRegistry } from '../engine/NodeExecutorRegistry';
+import { WorkflowScheduler } from '../scheduler/WorkflowScheduler';
 import {
     TriggerWorkflowSchema,
     CreateWorkflowSchema,
@@ -23,9 +24,11 @@ export async function workflowRoutes(
         workflowRepo: WorkflowRepository;
         executionRepo: ExecutionRepository;
         registry: NodeExecutorRegistry;
+        scheduler?: WorkflowScheduler;
+        onWorkflowUpdated?: (workflowId: string) => Promise<void>;
     }
 ): Promise<void> {
-    const { workflowService, workflowRepo, executionRepo, registry } = options;
+    const { workflowService, workflowRepo, executionRepo, registry, scheduler, onWorkflowUpdated } = options;
 
     fastify.post(
         '/workflows',
@@ -63,6 +66,11 @@ export async function workflowRoutes(
             const updated = await workflowRepo.update(request.params.id, body);
 
             if (!updated) throw NotFoundError(`Workflow ${request.params.id}`);
+
+            // Refresh scheduler/polling after workflow changes
+            if (scheduler) await scheduler.refresh(request.params.id).catch(() => {});
+            if (onWorkflowUpdated) await onWorkflowUpdated(request.params.id).catch(() => {});
+
             return reply.code(200).send(updated);
         }
     );

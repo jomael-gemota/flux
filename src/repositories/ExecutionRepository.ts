@@ -19,7 +19,7 @@ export class ExecutionRepository {
         workflowId: string,
         workflowVersion: number,
         input: unknown,
-        triggeredBy: 'api' | 'webhook' | 'replay' | 'manual' = 'api'
+        triggeredBy: 'api' | 'webhook' | 'replay' | 'manual' | 'schedule' = 'api'
     ): Promise<void> {
         await ExecutionModel.create({
             executionId,

@@ -19,6 +19,7 @@ import { GSheetsNode } from './nodes/GSheetsNode';
 import { SlackNode } from './nodes/SlackNode';
 import { TeamsNode } from './nodes/TeamsNode';
 import { BasecampNode } from './nodes/BasecampNode';
+import { TriggerNode } from './nodes/TriggerNode';
 
 import { WorkflowRepository } from './repositories/WorkflowRepository';
 import { ExecutionRepository } from './repositories/ExecutionRepository';
@@ -55,6 +56,7 @@ import { runSeeds } from './db/seeds';
 import { ApiKeyModel } from './db/models/ApiKeyModel';
 import { createWorkflowWorker } from './queue/WorkflowWorker';
 import { WorkflowScheduler } from './scheduler/WorkflowScheduler';
+import { PollingService } from './services/PollingService';
 
 async function bootstrap() {
 
@@ -63,6 +65,7 @@ async function bootstrap() {
     // 1. Engine setup
     const registry = new NodeExecutorRegistry();
     const memoryManager = new ChatMemoryManager();
+    registry.register('trigger', new TriggerNode());
     registry.register('http', new HttpNode());
     registry.register('llm', new LLMNode(memoryManager));
 	registry.register('condition', new ConditionNode());
@@ -97,9 +100,15 @@ async function bootstrap() {
         console.log('ℹ️  No REDIS_URL set — running without background worker (synchronous mode)');
     }
 
-    // 4. Start cron scheduler
+    // 4. Start cron scheduler + polling service
     const scheduler = new WorkflowScheduler(workflowRepo, workflowService);
     await scheduler.start();
+
+    const pollingService = new PollingService(
+        workflowRepo, workflowService, credentialRepo,
+        basecampAuth, slackAuth, teamsAuth, googleAuth,
+    );
+    await pollingService.start();
 
     // 3. Seed a default API key on first run if none exist
     const existingKey = await ApiKeyModel.findOne();
@@ -126,7 +135,10 @@ async function bootstrap() {
 
     // 5. Register routes (all API routes under /api prefix)
 	registerErrorHandler(fastify);
-    await fastify.register(workflowRoutes,   { prefix: '/api', workflowService, workflowRepo, executionRepo, registry });
+    await fastify.register(workflowRoutes,   {
+        prefix: '/api', workflowService, workflowRepo, executionRepo, registry, scheduler,
+        onWorkflowUpdated: async (wfId: string) => { await pollingService.refresh(wfId); },
+    });
     await fastify.register(executionRoutes,  { prefix: '/api', executionRepo, workflowService });
     await fastify.register(webhookRoutes,    { workflowService, workflowRepo });   // no prefix — called by external systems
     await fastify.register(apiKeyRoutes,     { prefix: '/api' });

@@ -196,14 +196,25 @@ export function serialize(
     }
   }
 
+  // Auto-detect trigger nodes as entry nodes (they always start workflows)
+  const triggerNodeIds = nodes
+    .filter(n => n.type === 'trigger')
+    .map(n => n.id);
+
   // Collect all canvas nodes marked as entry, filtered to those that still exist
-  const allEntryIds = rfNodes
+  const manualEntryIds = rfNodes
     .filter(n => n.data.isEntry && validNodeIds.has(n.id))
     .map(n => n.id);
 
+  // Merge: trigger nodes always come first, then any manually-marked entries
+  const mergedEntryIds = [
+    ...triggerNodeIds,
+    ...manualEntryIds.filter(id => !triggerNodeIds.includes(id)),
+  ];
+
   // Fall back to the passed-in entryNodeId only if it still exists in the current nodes
   const fallbackId = validNodeIds.has(entryNodeId) ? entryNodeId : (nodes[0]?.id ?? '');
-  const resolvedEntryIds = allEntryIds.length > 0 ? allEntryIds : [fallbackId].filter(Boolean);
+  const resolvedEntryIds = mergedEntryIds.length > 0 ? mergedEntryIds : [fallbackId].filter(Boolean);
   const resolvedEntryNodeId = resolvedEntryIds[0] ?? '';
 
   return {

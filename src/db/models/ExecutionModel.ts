@@ -54,7 +54,7 @@ const ExecutionSchema = new Schema<ExecutionDocument>(
         completedAt: { type: Date },
         triggeredBy: {
             type: String,
-            enum: ['api', 'webhook', 'replay', 'manual', 'node-test'],
+            enum: ['api', 'webhook', 'replay', 'manual', 'schedule', 'node-test'],
             default: 'api',
         },
         testNodeId: { type: String },

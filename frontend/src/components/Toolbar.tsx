@@ -123,9 +123,10 @@ export function Toolbar() {
           size="sm"
           onClick={handleSave}
           disabled={!activeWorkflow || !isDirty || saving}
+          title="Save workflow structure (nodes, connections, positions). Use the Save button inside each node's config panel to save node settings."
         >
           {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-          Save
+          Save Workflow
         </Button>
 
         <Button

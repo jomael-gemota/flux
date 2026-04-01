@@ -19,6 +19,13 @@ interface PaletteCategory {
 
 const CATEGORIES: PaletteCategory[] = [
   {
+    id: 'triggers',
+    label: 'Triggers',
+    nodes: [
+      { type: 'trigger', label: 'Trigger', description: 'Manual, webhook, schedule, app event, or email trigger' },
+    ],
+  },
+  {
     id: 'api',
     label: 'REST API',
     nodes: [

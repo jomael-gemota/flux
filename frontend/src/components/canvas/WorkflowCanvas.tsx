@@ -33,6 +33,7 @@ import { GSheetsNodeWidget } from '../nodes/GSheetsNodeWidget';
 import { SlackNodeWidget } from '../nodes/SlackNodeWidget';
 import { TeamsNodeWidget } from '../nodes/TeamsNodeWidget';
 import { BasecampNodeWidget } from '../nodes/BasecampNodeWidget';
+import { TriggerNodeWidget } from '../nodes/TriggerNodeWidget';
 import type { NodeType } from '../../types/workflow';
 
 function randomId() {
@@ -44,6 +45,7 @@ function WorkflowNodeRenderer(props: NodeProps) {
   const p = props as any;
   const nodeType = (props.data as CanvasNodeData).nodeType;
   switch (nodeType) {
+    case 'trigger': return <TriggerNodeWidget {...p} />;
     case 'http': return <HttpNodeWidget {...p} />;
     case 'llm': return <LLMNodeWidget {...p} />;
     case 'condition': return <ConditionNodeWidget {...p} />;
@@ -65,6 +67,7 @@ const nodeTypes: NodeTypes = { workflowNode: WorkflowNodeRenderer };
 const edgeTypes: EdgeTypes = { execution: ExecutionEdge };
 
 const DEFAULT_CONFIGS: Partial<Record<NodeType, Record<string, unknown>>> = {
+  trigger: { triggerType: 'manual' },
   http: { method: 'GET', url: '' },
   llm: { provider: 'openai', model: 'gpt-4o-mini', temperature: 0.7, maxTokens: 500, userPrompt: '' },
   condition: { condition: { type: 'leaf', left: '', operator: 'eq', right: '' }, trueNext: '', falseNext: '' },
