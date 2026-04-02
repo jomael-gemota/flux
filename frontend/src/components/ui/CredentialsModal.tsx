@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { X, Plus, Trash2, Loader2, CheckCircle2, AlertCircle, ExternalLink, Settings, MessageSquare } from 'lucide-react';
+import { X, Plus, Trash2, Loader2, CheckCircle2, AlertCircle, ExternalLink, Settings } from 'lucide-react';
+import { SlackIcon, TeamsIcon, BasecampIcon } from '../nodes/NodeIcons';
 import { useCredentialList, useDeleteCredential } from '../../hooks/useCredentials';
 import { startGoogleOAuth, checkGoogleConfig, startSlackOAuth, checkSlackConfig, startTeamsOAuth, checkTeamsConfig, startBasecampOAuth, checkBasecampConfig } from '../../api/client';
 import { ConfirmModal } from './ConfirmModal';
@@ -211,7 +212,7 @@ GOOGLE_REDIRECT_URI=http://localhost:3000/oauth/google/callback`}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-violet-500 dark:text-violet-400" />
+                <SlackIcon size={16} />
                 <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Slack</span>
               </div>
               {isSlackConfigured ? (
@@ -270,7 +271,7 @@ SLACK_REDIRECT_URI=http://localhost:3000/oauth/slack/callback`}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <img src="/logos/ms-teams.png" alt="Microsoft Teams" className="w-4 h-4 object-contain" />
+                <TeamsIcon size={16} />
                 <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Microsoft Teams</span>
               </div>
               {isTeamsConfigured ? (
@@ -330,7 +331,7 @@ TEAMS_REDIRECT_URI=http://localhost:3000/api/oauth/teams/callback`}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <img src="/logos/basecamp.png" alt="Basecamp" className="w-4 h-4 object-contain" />
+                <BasecampIcon size={16} />
                 <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Basecamp</span>
               </div>
               {isBasecampConfigured ? (
@@ -415,11 +416,11 @@ function CredentialRow({ cred, onDelete }: { cred: CredentialSummary; onDelete: 
   return (
     <div className="flex items-start gap-3 bg-slate-50 dark:bg-slate-700/40 border border-slate-200 dark:border-slate-600/40 rounded-lg px-3.5 py-3">
       {isSlack
-        ? <MessageSquare className="w-5 h-5 text-violet-500 dark:text-violet-400 shrink-0 mt-0.5" />
+        ? <span className="shrink-0 mt-0.5"><SlackIcon size={20} /></span>
         : isTeams
-        ? <img src="/logos/ms-teams.png" alt="Microsoft Teams" className="w-5 h-5 object-contain shrink-0 mt-0.5" />
+        ? <span className="shrink-0 mt-0.5"><TeamsIcon size={20} /></span>
         : isBasecamp
-        ? <img src="/logos/basecamp.png" alt="Basecamp" className="w-5 h-5 object-contain shrink-0 mt-0.5" />
+        ? <span className="shrink-0 mt-0.5"><BasecampIcon size={20} /></span>
         : <GoogleIcon className="w-5 h-5 shrink-0 mt-0.5" />
       }
       <div className="flex-1 min-w-0">
