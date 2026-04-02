@@ -1,4 +1,4 @@
-import { Save, Play, Loader2, GitBranch, LogOut, PanelRight, KeyRound, Sun, Moon } from 'lucide-react';
+import { Save, Play, Loader2, LogOut, PanelRight, KeyRound, Sun, Moon } from 'lucide-react';
 import { Button } from './ui/Button';
 import { useWorkflowStore } from '../store/workflowStore';
 import { useTriggerWorkflow } from '../hooks/useWorkflows';
@@ -87,9 +87,9 @@ export function Toolbar() {
       onCancel={() => setAlertModal(a => ({ ...a, open: false }))}
     />
     <header className="h-12 glass-surface border-b border-black/[0.07] dark:border-white/10 flex items-center px-4 gap-4 shrink-0">
-      <div className="flex items-center gap-2 font-semibold text-sm">
-        <GitBranch className="w-4 h-4 text-blue-500 dark:text-blue-400" />
-        <span className="text-slate-600 dark:text-slate-300">Workflow Platform</span>
+      <div className="flex items-center gap-2">
+        <img src="/logo.png" alt="Flux" className="w-6 h-6 rounded-md object-contain" />
+        <span className="font-semibold text-sm text-slate-700 dark:text-slate-200">Flux</span>
       </div>
 
       <div className="w-px h-6 glass-divider" />
