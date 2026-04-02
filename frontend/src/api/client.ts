@@ -8,8 +8,14 @@ import type {
 
 const BASE = '/api';
 
-function getApiKey(): string {
-  return localStorage.getItem('wap_api_key') ?? '';
+function getAuthHeader(): Record<string, string> {
+  // JWT auth (new Google sign-in flow)
+  const jwt = localStorage.getItem('flux_auth_token');
+  if (jwt) return { Authorization: `Bearer ${jwt}` };
+  // Legacy API-key fallback (programmatic access)
+  const key = localStorage.getItem('wap_api_key');
+  if (key) return { 'x-api-key': key };
+  return {};
 }
 
 async function request<T>(
@@ -22,7 +28,7 @@ async function request<T>(
       // Only set Content-Type when there is a body — sending it on bodyless
       // requests (DELETE, GET) causes Fastify to reject with 400.
       ...(options.body != null ? { 'Content-Type': 'application/json' } : {}),
-      'x-api-key': getApiKey(),
+      ...getAuthHeader(),
       ...(options.headers ?? {}),
     },
   });

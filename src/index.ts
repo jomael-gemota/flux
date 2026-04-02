@@ -4,6 +4,7 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
+import fastifyJwt from '@fastify/jwt';
 import { existsSync } from 'fs';
 import { join } from 'path';
 
@@ -39,6 +40,9 @@ import { credentialRoutes } from './routes/credentialRoutes';
 import { slackDataRoutes } from './routes/slackDataRoutes';
 import { teamsDataRoutes } from './routes/teamsDataRoutes';
 import { basecampDataRoutes } from './routes/basecampDataRoutes';
+import { authRoutes } from './routes/authRoutes';
+import { adminRoutes } from './routes/adminRoutes';
+import { UserAuthService } from './services/UserAuthService';
 
 import { connectDatabase } from './db/database';
 import { getBaseUrl } from './utils/baseUrl';
@@ -73,6 +77,9 @@ async function bootstrap() {
     registry.register('transform', new TransformNode());
     registry.register('output', new OutputNode());
     const runner = new WorkflowRunner(registry);
+
+    // 2a. User auth service
+    const userAuth = new UserAuthService();
 
     // 2. Repositories & services
     const workflowRepo    = new WorkflowRepository();
@@ -128,10 +135,20 @@ async function bootstrap() {
 		genReqId: () => crypto.randomUUID(),
 	});
 
-    await fastify.register(cors, { origin: process.env.CORS_ORIGIN ?? '*' });
-    await fastify.register(helmet);
+    await fastify.register(cors, { origin: process.env.CORS_ORIGIN ?? '*', credentials: true });
+    await fastify.register(helmet, { contentSecurityPolicy: false }); // CSP handled by Vite in dev
     await fastify.register(rateLimit, { max: 100, timeWindow: '1 minute' });
-	await fastify.register(sensible);
+    await fastify.register(sensible);
+
+    // JWT plugin — all routes can call request.jwtVerify() / fastify.jwt.sign()
+    await fastify.register(fastifyJwt, {
+        secret: process.env.JWT_SECRET ?? 'flux-dev-secret-change-in-production',
+    });
+    // Convenience decorator used by authRoutes /auth/me
+    fastify.decorate('authenticate', async (request: any, reply: any) => {
+        try { await request.jwtVerify(); }
+        catch (err) { reply.send(err); }
+    });
 
     // 5. Register routes (all API routes under /api prefix)
 	registerErrorHandler(fastify);
@@ -147,6 +164,9 @@ async function bootstrap() {
     await fastify.register(slackDataRoutes,      { prefix: '/api', slackAuth });
     await fastify.register(teamsDataRoutes,      { prefix: '/api', teamsAuth });
     await fastify.register(basecampDataRoutes,   { prefix: '/api', basecampAuth });
+    // Auth & admin (no prefix-level auth guard — each route manages its own)
+    await fastify.register(authRoutes,  { prefix: '/api', userAuth });
+    await fastify.register(adminRoutes, { prefix: '/api' });
 
     // 6. Health check
     fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));

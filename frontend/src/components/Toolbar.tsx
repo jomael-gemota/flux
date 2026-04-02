@@ -1,4 +1,4 @@
-import { Save, Play, Loader2, LogOut, PanelRight, KeyRound, Sun, Moon, Check } from 'lucide-react';
+import { Save, Play, Loader2, LogOut, PanelRight, KeyRound, Sun, Moon, Check, Shield, Clock } from 'lucide-react';
 import { Button } from './ui/Button';
 import { useWorkflowStore } from '../store/workflowStore';
 import { useTriggerWorkflow } from '../hooks/useWorkflows';
@@ -6,6 +6,10 @@ import { useSaveWorkflow } from '../hooks/useSaveWorkflow';
 import { useState, useEffect, useRef } from 'react';
 import { CredentialsModal } from './ui/CredentialsModal';
 import { ConfirmModal } from './ui/ConfirmModal';
+import { useAuthStore } from '../store/authStore';
+import { useQuery } from '@tanstack/react-query';
+import { fetchAdminStats } from '../api/auth';
+import { OwnerDashboard } from './admin/OwnerDashboard';
 
 export function Toolbar() {
   const {
@@ -25,6 +29,19 @@ export function Toolbar() {
 
   const { save, isSaving } = useSaveWorkflow();
   const trigger = useTriggerWorkflow();
+  const { user, logout } = useAuthStore();
+  const isOwner = user?.role === 'owner';
+
+  // Pending user count badge — only fetched for owners, every 60 s
+  const { data: adminStats } = useQuery({
+    queryKey: ['admin-stats'],
+    queryFn: fetchAdminStats,
+    enabled: isOwner,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const [ownerDashOpen, setOwnerDashOpen] = useState(false);
   const [nameEdit, setNameEdit] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [credentialsOpen, setCredentialsOpen] = useState(false);
@@ -93,11 +110,6 @@ export function Toolbar() {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       showAlert('Trigger failed', msg);
     }
-  }
-
-  function handleLogout() {
-    localStorage.removeItem('wap_api_key');
-    window.location.reload();
   }
 
   const saving = isSaving;
@@ -244,15 +256,47 @@ export function Toolbar() {
           }
         </button>
 
-        <button
-          onClick={handleLogout}
-          className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors p-1"
-          title="Change API key"
-        >
-          <LogOut className="w-3.5 h-3.5" />
-        </button>
+        {/* Platform Owner dashboard button */}
+        {isOwner && (
+          <button
+            onClick={() => setOwnerDashOpen(true)}
+            title="Platform Owner Dashboard"
+            className="relative flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-colors"
+          >
+            <Shield className="w-3.5 h-3.5" />
+            Owners
+            {(adminStats?.pending ?? 0) > 0 && (
+              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-bold leading-none">
+                <Clock className="w-2.5 h-2.5" />
+                {adminStats!.pending}
+              </span>
+            )}
+          </button>
+        )}
+
+        <div className="w-px h-5 glass-divider" />
+
+        {/* User avatar + sign-out */}
+        <div className="flex items-center gap-2">
+          {user?.avatar ? (
+            <img src={user.avatar} alt={user.name} className="w-6 h-6 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-600" />
+          ) : (
+            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-violet-500 flex items-center justify-center text-white text-[10px] font-bold">
+              {user?.name?.charAt(0).toUpperCase() ?? '?'}
+            </div>
+          )}
+          <button
+            onClick={logout}
+            className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors p-1"
+            title="Sign out"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
     </header>
+
+    {ownerDashOpen && <OwnerDashboard onClose={() => setOwnerDashOpen(false)} />}
 
     <CredentialsModal open={credentialsOpen} onClose={() => setCredentialsOpen(false)} />
     </>
