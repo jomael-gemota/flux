@@ -374,7 +374,7 @@ export function WorkflowSidebar() {
   const [creatingProject, setCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const newProjectInputRef = useRef<HTMLInputElement>(null);
-  const [draggingWfId, setDraggingWfId] = useState<string | null>(null);
+  const [, setDraggingWfId] = useState<string | null>(null);
   const [ungroupedDragOver, setUngroupedDragOver] = useState(false);
   // Tracks the previous activeWorkflow id so the project-assignment effect
   // only fires when a __new__ workflow transitions to a real saved id.

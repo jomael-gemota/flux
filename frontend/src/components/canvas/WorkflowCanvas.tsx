@@ -145,7 +145,7 @@ export function WorkflowCanvas() {
 
   // Capture the viewport after every pan/zoom so it's ready when Save is pressed.
   const onMoveEnd = useCallback(
-    (_event: MouseEvent | TouchEvent, vp: Viewport) => {
+    (_event: MouseEvent | TouchEvent | null, vp: Viewport) => {
       setCanvasViewport(vp);
     },
     [setCanvasViewport],
