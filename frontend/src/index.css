@@ -118,3 +118,64 @@ body {
 .dark .react-flow__controls button:hover {
   background-color: #334155;
 }
+
+/* ── Sign-in page: lightweight agentic workflow vectors ───────────────────── */
+@keyframes agentFloatSlow {
+  0%, 100% { transform: translateY(0px); }
+  50%      { transform: translateY(-8px); }
+}
+
+@keyframes agentFloatFast {
+  0%, 100% { transform: translateY(0px); }
+  50%      { transform: translateY(7px); }
+}
+
+@keyframes agentDashFlow {
+  to { stroke-dashoffset: -54; }
+}
+
+@keyframes agentNodePulse {
+  0%, 100% { opacity: 0.88; }
+  50%      { opacity: 1; }
+}
+
+.agent-float-slow {
+  animation: agentFloatSlow 8s ease-in-out infinite;
+}
+
+.agent-float-fast {
+  animation: agentFloatFast 6.5s ease-in-out infinite;
+}
+
+.agent-flow-path,
+.agent-flow-path-delay {
+  stroke-dasharray: 7 8;
+  animation: agentDashFlow 2.4s linear infinite;
+}
+
+.agent-flow-path-delay {
+  animation-delay: 0.7s;
+}
+
+.agent-node-pulse {
+  animation: agentNodePulse 2.2s ease-in-out infinite;
+}
+
+@keyframes agentRingSpin {
+  from { transform: rotate(0deg); transform-origin: 835px 332px; }
+  to   { transform: rotate(360deg); transform-origin: 835px 332px; }
+}
+
+@keyframes agentCircuitPulse {
+  0%, 100% { opacity: 0.7; }
+  50%      { opacity: 1; }
+}
+
+.agent-ring-spin {
+  stroke-dasharray: 15 10;
+  animation: agentRingSpin 14s linear infinite;
+}
+
+.agent-circuit-pulse {
+  animation: agentCircuitPulse 2.6s ease-in-out infinite;
+}
