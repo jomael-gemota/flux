@@ -1,9 +1,10 @@
-import { Save, Play, Loader2, LogOut, PanelRight, KeyRound, Sun, Moon, Check, Shield, Clock } from 'lucide-react';
+import { Save, Play, Loader2, LogOut, PanelRight, KeyRound, Sun, Moon, Check, Shield, Clock, ChevronDown } from 'lucide-react';
 import { Button } from './ui/Button';
 import { useWorkflowStore } from '../store/workflowStore';
 import { useTriggerWorkflow } from '../hooks/useWorkflows';
 import { useSaveWorkflow } from '../hooks/useSaveWorkflow';
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { CredentialsModal } from './ui/CredentialsModal';
 import { ConfirmModal } from './ui/ConfirmModal';
 import { useAuthStore } from '../store/authStore';
@@ -42,6 +43,10 @@ export function Toolbar() {
   });
 
   const [ownerDashOpen, setOwnerDashOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
+  const profileRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const [nameEdit, setNameEdit] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [credentialsOpen, setCredentialsOpen] = useState(false);
@@ -93,6 +98,26 @@ export function Toolbar() {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   }, []);
+
+  // Close profile dropdown when clicking outside (trigger or portal dropdown)
+  useEffect(() => {
+    function onOutsideClick(e: MouseEvent) {
+      const target = e.target as Node;
+      const insideTrigger  = profileRef.current?.contains(target) ?? false;
+      const insideDropdown = dropdownRef.current?.contains(target) ?? false;
+      if (!insideTrigger && !insideDropdown) setProfileOpen(false);
+    }
+    if (profileOpen) document.addEventListener('mousedown', onOutsideClick);
+    return () => document.removeEventListener('mousedown', onOutsideClick);
+  }, [profileOpen]);
+
+  function openProfile() {
+    if (profileRef.current) {
+      const rect = profileRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+    }
+    setProfileOpen(v => !v);
+  }
 
   async function handleTrigger() {
     if (!activeWorkflow || !activeWorkflow.id || activeWorkflow.id.startsWith('__new__')) return;
@@ -276,21 +301,21 @@ export function Toolbar() {
 
         <div className="w-px h-5 glass-divider" />
 
-        {/* User avatar + sign-out */}
-        <div className="flex items-center gap-2">
-          {user?.avatar ? (
-            <img src={user.avatar} alt={user.name} className="w-6 h-6 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-600" />
-          ) : (
-            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-violet-500 flex items-center justify-center text-white text-[10px] font-bold">
-              {user?.name?.charAt(0).toUpperCase() ?? '?'}
-            </div>
-          )}
+        {/* User avatar — trigger */}
+        <div ref={profileRef}>
           <button
-            onClick={logout}
-            className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors p-1"
-            title="Sign out"
+            onClick={openProfile}
+            className="flex items-center gap-1.5 rounded-full hover:ring-2 hover:ring-blue-400/50 transition-all focus:outline-none"
+            title="Your profile"
           >
-            <LogOut className="w-3.5 h-3.5" />
+            {user?.avatar ? (
+              <img src={user.avatar} alt={user?.name ?? 'User'} className="w-7 h-7 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-600" />
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-violet-500 flex items-center justify-center text-white text-xs font-bold">
+                {user?.name?.charAt(0).toUpperCase() ?? '?'}
+              </div>
+            )}
+            <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform duration-200 ${profileOpen ? 'rotate-180' : ''}`} />
           </button>
         </div>
       </div>
@@ -299,6 +324,66 @@ export function Toolbar() {
     {ownerDashOpen && <OwnerDashboard onClose={() => setOwnerDashOpen(false)} />}
 
     <CredentialsModal open={credentialsOpen} onClose={() => setCredentialsOpen(false)} />
+
+    {/* Profile dropdown — rendered via portal so it escapes overflow:hidden parents */}
+    {profileOpen && createPortal(
+      <div
+        ref={dropdownRef}
+        style={{ position: 'fixed', top: dropdownPos.top, right: dropdownPos.right, zIndex: 9999 }}
+        className="w-64 bg-white dark:bg-[#1E293B] border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden"
+      >
+        {/* Header */}
+        <div className="px-4 pt-4 pb-3 flex items-center gap-3 border-b border-slate-100 dark:border-slate-700/60">
+          {user?.avatar ? (
+            <img src={user.avatar} alt={user?.name ?? 'User'} className="w-11 h-11 rounded-full object-cover ring-2 ring-blue-400/30 shrink-0" />
+          ) : (
+            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-400 to-violet-500 flex items-center justify-center text-white text-base font-bold shrink-0">
+              {user?.name?.charAt(0).toUpperCase() ?? '?'}
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-900 dark:text-white truncate leading-tight">{user?.name ?? '—'}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{user?.email ?? '—'}</p>
+          </div>
+        </div>
+
+        {/* Role */}
+        <div className="px-4 py-2.5 flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60">
+          <span className="text-xs text-slate-500 dark:text-slate-400">Role</span>
+          {user?.role === 'owner' ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300 text-[11px] font-semibold">
+              <Shield className="w-3 h-3" />
+              Platform Owner
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 text-[11px] font-semibold">
+              User
+            </span>
+          )}
+        </div>
+
+        {/* Status */}
+        <div className="px-4 py-2.5 flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60">
+          <span className="text-xs text-slate-500 dark:text-slate-400">Status</span>
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[11px] font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+            Active
+          </span>
+        </div>
+
+        {/* Sign out */}
+        <div className="px-2 py-2">
+          <button
+            onClick={() => { setProfileOpen(false); logout(); }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors font-medium"
+          >
+            <LogOut className="w-4 h-4" />
+            Sign out
+          </button>
+        </div>
+      </div>,
+      document.body,
+    )}
     </>
   );
 }

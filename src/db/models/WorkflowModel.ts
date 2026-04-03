@@ -7,6 +7,8 @@ export interface WorkflowDocument extends Document {
     version: number;
     definition: WorkflowDefinition;
     webhookSecret: string;
+    /** MongoDB User ObjectId string — null for legacy / API-key-created workflows */
+    userId?: string;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -14,10 +16,11 @@ export interface WorkflowDocument extends Document {
 const WorkflowSchema = new Schema<WorkflowDocument>(
     {
         workflowId: { type: String, required: true, unique: true, index: true },
-        name: { type: String, required: true },
-        version: { type: Number, required: true, default: 1 },
+        name:       { type: String, required: true },
+        version:    { type: Number, required: true, default: 1 },
         definition: { type: Schema.Types.Mixed, required: true },
         webhookSecret: { type: String, required: true },
+        userId:     { type: String, index: true },   // sparse index; null for legacy workflows
     },
     {
         timestamps: true,

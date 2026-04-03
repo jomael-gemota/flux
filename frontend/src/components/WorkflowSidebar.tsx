@@ -367,6 +367,8 @@ export function WorkflowSidebar() {
     setEdges,
     setDirty,
     setSelectedNodeId,
+    pendingNewProjectName,
+    setPendingNewProjectName,
   } = useWorkflowStore();
 
   const [projects, setProjectsState] = useState<Project[]>(loadProjects);
@@ -402,6 +404,17 @@ export function WorkflowSidebar() {
 
   useEffect(() => { saveProjects(projects); }, [projects]);
   useEffect(() => { saveOpenProjects(openProjects); }, [openProjects]);
+
+  // React to a project name submitted from the canvas modal
+  useEffect(() => {
+    if (!pendingNewProjectName) return;
+    const name = pendingNewProjectName.trim();
+    setPendingNewProjectName(null);
+    if (!name) return;
+    const id = newId();
+    setProjectsState((prev) => [...prev, { id, name, workflowIds: [] }]);
+    setOpenProjects((prev) => new Set([...prev, id]));
+  }, [pendingNewProjectName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (creatingProject) newProjectInputRef.current?.focus();

@@ -179,10 +179,23 @@ function CategorySection({
 
 interface NodePickerPopupProps {
   onSelect: (type: NodeType, label: string) => void;
+  /** Controlled open state — when provided the component runs in controlled mode */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function NodePickerPopup({ onSelect }: NodePickerPopupProps) {
-  const [open, setOpen] = useState(false);
+export function NodePickerPopup({ onSelect, open: controlledOpen, onOpenChange }: NodePickerPopupProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+
+  function setOpen(value: boolean) {
+    if (isControlled) {
+      onOpenChange?.(value);
+    } else {
+      setInternalOpen(value);
+    }
+  }
   const [query, setQuery] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);

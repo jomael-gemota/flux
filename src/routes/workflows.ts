@@ -1,5 +1,11 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest } from 'fastify';
 import { apiKeyAuth } from '../middleware/auth';
+
+/** Extracts the authenticated user's MongoDB id from a JWT-authenticated request.
+ *  Returns undefined for API-key authenticated requests (no user context). */
+function getRequestUserId(request: FastifyRequest): string | undefined {
+    return (request as any).user?.sub ?? undefined;
+}
 import { WorkflowService } from '../services/WorkflowService';
 import { WorkflowRepository } from '../repositories/WorkflowRepository';
 import { ExecutionRepository } from '../repositories/ExecutionRepository';
@@ -38,6 +44,7 @@ export async function workflowRoutes(
         },
         async (request, reply) => {
             const body = CreateWorkflowSchema.parse(request.body);
+            const userId = getRequestUserId(request);
 
             const workflow = {
                 ...body,
@@ -45,7 +52,7 @@ export async function workflowRoutes(
                 version: 1,
             };
 
-            const { workflow: created, webhookSecret } = await workflowRepo.create(workflow);
+            const { workflow: created, webhookSecret } = await workflowRepo.create(workflow, userId);
 
             return reply.code(201).send({
                 ...created,
@@ -63,7 +70,8 @@ export async function workflowRoutes(
         },
         async (request, reply) => {
             const body = UpdateWorkflowSchema.parse(request.body);
-            const updated = await workflowRepo.update(request.params.id, body);
+            const userId = getRequestUserId(request);
+            const updated = await workflowRepo.update(request.params.id, body, userId);
 
             if (!updated) throw NotFoundError(`Workflow ${request.params.id}`);
 
@@ -79,7 +87,8 @@ export async function workflowRoutes(
         '/workflows/:id',
         { preHandler: apiKeyAuth },
         async (request, reply) => {
-            const deleted = await workflowRepo.delete(request.params.id);
+            const userId = getRequestUserId(request);
+            const deleted = await workflowRepo.delete(request.params.id, userId);
             if (!deleted) throw NotFoundError(`Workflow ${request.params.id}`);
             return reply.code(200).send({ deleted: true, id: request.params.id });
         }
@@ -93,7 +102,8 @@ export async function workflowRoutes(
         },
         async (request, reply) => {
             const query = CursorPaginationSchema.parse(request.query);
-            const result = await workflowRepo.findAll(query.limit, query.cursor ?? undefined);
+            const userId = getRequestUserId(request);
+            const result = await workflowRepo.findAll(query.limit, query.cursor ?? undefined, userId);
             return reply.code(200).send(result);
         }
     );
@@ -102,7 +112,8 @@ export async function workflowRoutes(
         '/workflows/:id',
         { preHandler: apiKeyAuth },
         async (request, reply) => {
-            const workflow = await workflowRepo.findById(request.params.id);
+            const userId = getRequestUserId(request);
+            const workflow = await workflowRepo.findById(request.params.id, userId);
             if (!workflow) throw NotFoundError(`Workflow ${request.params.id}`);
             return reply.code(200).send(workflow);
         }
@@ -129,7 +140,8 @@ export async function workflowRoutes(
         '/workflows/:id/versions',
         { preHandler: apiKeyAuth },
         async (request, reply) => {
-            const workflow = await workflowRepo.findById(request.params.id);
+            const userId = getRequestUserId(request);
+            const workflow = await workflowRepo.findById(request.params.id, userId);
             if (!workflow) throw NotFoundError(`Workflow ${request.params.id}`);
 
             const versions = await workflowRepo.findVersionHistory(request.params.id);
@@ -147,8 +159,9 @@ export async function workflowRoutes(
         },
         async (request, reply) => {
             const { context } = NodeTestSchema.parse(request.body);
+            const userId = getRequestUserId(request);
 
-            const workflow = await workflowRepo.findById(request.params.id);
+            const workflow = await workflowRepo.findById(request.params.id, userId);
             if (!workflow) throw NotFoundError(`Workflow ${request.params.id}`);
 
             const node = workflow.nodes.find(n => n.id === request.params.nodeId);
@@ -198,7 +211,8 @@ export async function workflowRoutes(
         '/workflows/:id/node-test-results',
         { preHandler: apiKeyAuth },
         async (request, reply) => {
-            const workflow = await workflowRepo.findById(request.params.id);
+            const userId = getRequestUserId(request);
+            const workflow = await workflowRepo.findById(request.params.id, userId);
             if (!workflow) throw NotFoundError(`Workflow ${request.params.id}`);
 
             const results = await executionRepo.findAllNodeTestResults(request.params.id);

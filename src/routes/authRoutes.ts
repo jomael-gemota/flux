@@ -6,6 +6,18 @@ interface AuthRouteOptions {
     userAuth: UserAuthService;
 }
 
+/**
+ * Returns the URL the browser should be redirected to after auth.
+ *
+ * - Development: frontend Vite dev-server lives on a different port than the
+ *   backend, so we use CORS_ORIGIN (e.g. http://localhost:5173).
+ * - Production: frontend is served by the backend itself, so both share the
+ *   same origin — getBaseUrl() is correct.
+ */
+function getFrontendUrl(): string {
+    return (process.env.CORS_ORIGIN ?? getBaseUrl()).replace(/\/$/, '');
+}
+
 export async function authRoutes(
     fastify: FastifyInstance,
     { userAuth }: AuthRouteOptions,
@@ -21,7 +33,7 @@ export async function authRoutes(
         '/auth/google/callback',
         async (req, reply) => {
             const { code, error } = req.query;
-            const frontendBase = getBaseUrl();
+            const frontendBase = getFrontendUrl();
 
             if (error || !code) {
                 return reply.redirect(`${frontendBase}/?auth_error=access_denied`);
@@ -30,14 +42,12 @@ export async function authRoutes(
             try {
                 const user = await userAuth.handleCallback(code);
                 const payload = userAuth.toJwtPayload(user);
-                // Sign a 7-day JWT using the @fastify/jwt plugin
-                const token = (fastify as any).jwt.sign(payload, { expiresIn: '7d' });
-                // Pass token to the SPA via URL fragment — never lands in server logs
+                const token = (fastify as any).jwt.sign(payload, { expiresIn: '8h' });
                 reply.redirect(`${frontendBase}/?auth_token=${token}`);
             } catch (err) {
                 fastify.log.error(err, 'Google auth callback error');
                 const msg = err instanceof Error ? encodeURIComponent(err.message) : 'unknown';
-                reply.redirect(`${getBaseUrl()}/?auth_error=${msg}`);
+                reply.redirect(`${frontendBase}/?auth_error=${msg}`);
             }
         },
     );
@@ -53,7 +63,7 @@ export async function authRoutes(
 
             // Re-sign with fresh status in case it was just updated
             const payload = userAuth.toJwtPayload(user);
-            const freshToken = (fastify as any).jwt.sign(payload, { expiresIn: '7d' });
+            const freshToken = (fastify as any).jwt.sign(payload, { expiresIn: '8h' });
             return { user, token: freshToken };
         },
     );

@@ -4,19 +4,28 @@ import { WorkflowVersionModel } from '../db/models/WorkflowVersionModel';
 import { WorkflowDefinition } from '../types/workflow.types';
 import { PaginatedResponse } from '../types/api.types';
 
+/** Build a MongoDB filter that always matches on workflowId and optionally on userId */
+function workflowFilter(id: string, userId?: string): Record<string, unknown> {
+    const f: Record<string, unknown> = { workflowId: id };
+    if (userId) f.userId = userId;
+    return f;
+}
+
 export class WorkflowRepository {
 
     async create(
-        workflow: WorkflowDefinition
+        workflow: WorkflowDefinition,
+        userId?: string,
     ): Promise<{ workflow: WorkflowDefinition; webhookSecret: string }> {
         const webhookSecret = crypto.randomBytes(32).toString('hex');
 
         await WorkflowModel.create({
             workflowId: workflow.id,
-            name: workflow.name,
-            version: workflow.version,
+            name:       workflow.name,
+            version:    workflow.version,
             definition: workflow,
             webhookSecret,
+            ...(userId ? { userId } : {}),
         });
 
         return { workflow, webhookSecret };
@@ -24,9 +33,10 @@ export class WorkflowRepository {
 
     async update(
         id: string,
-        updates: Partial<WorkflowDefinition>
+        updates: Partial<WorkflowDefinition>,
+        userId?: string,
     ): Promise<WorkflowDefinition | null> {
-        const existing = await WorkflowModel.findOne({ workflowId: id });
+        const existing = await WorkflowModel.findOne(workflowFilter(id, userId));
         if (!existing) return null;
 
         // Use toObject() to get a guaranteed plain POJO from the Mongoose Mixed field,
@@ -70,13 +80,13 @@ export class WorkflowRepository {
         return updated;
     }
 
-    async delete(id: string): Promise<boolean> {
-        const result = await WorkflowModel.deleteOne({ workflowId: id });
+    async delete(id: string, userId?: string): Promise<boolean> {
+        const result = await WorkflowModel.deleteOne(workflowFilter(id, userId));
         return result.deletedCount > 0;
     }
 
-    async findById(id: string): Promise<WorkflowDefinition | null> {
-        const doc = await WorkflowModel.findOne({ workflowId: id });
+    async findById(id: string, userId?: string): Promise<WorkflowDefinition | null> {
+        const doc = await WorkflowModel.findOne(workflowFilter(id, userId));
         return doc ? (doc.definition as WorkflowDefinition) : null;
     }
 
@@ -94,11 +104,12 @@ export class WorkflowRepository {
 
     async findAll(
         limit: number,
-        cursor?: string
+        cursor?: string,
+        userId?: string,
     ): Promise<PaginatedResponse<WorkflowDefinition>> {
-        const query = cursor
-            ? { createdAt: { $lt: new Date(cursor) } }
-            : {};
+        const query: Record<string, unknown> = {};
+        if (userId) query.userId = userId;
+        if (cursor) query.createdAt = { $lt: new Date(cursor) };
 
         const docs = await WorkflowModel
             .find(query)

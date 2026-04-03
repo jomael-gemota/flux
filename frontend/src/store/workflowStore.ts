@@ -70,6 +70,16 @@ interface WorkflowStore {
   beginExecution: (statuses: Record<string, NodeExecutionStatus>) => void;
   isExecuting: boolean;
   setIsExecuting: (v: boolean) => void;
+
+  // Canvas empty-state helpers
+  /** Creates a blank unsaved workflow and makes it active */
+  createNewWorkflow: (projectId?: string) => void;
+  /**
+   * When non-null the sidebar should create a project with this name.
+   * The canvas sets it after the user confirms the modal; the sidebar clears it once done.
+   */
+  pendingNewProjectName: string | null;
+  setPendingNewProjectName: (name: string | null) => void;
 }
 
 export const useWorkflowStore = create<WorkflowStore>((set) => ({
@@ -118,4 +128,14 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
   beginExecution: (statuses) => set({ executionStatuses: statuses, isExecuting: true }),
   isExecuting: false,
   setIsExecuting: (v) => set({ isExecuting: v }),
+
+  createNewWorkflow: (projectId) => {
+    const newWf: WorkflowDefinition = {
+      id: '__new__', name: 'New Workflow', version: 1, nodes: [], entryNodeId: '',
+    };
+    set({ activeWorkflow: newWf, nodes: [], edges: [], isDirty: false, selectedNodeId: null });
+    if (projectId) sessionStorage.setItem('wap_new_wf_project', projectId);
+  },
+  pendingNewProjectName: null,
+  setPendingNewProjectName: (name) => set({ pendingNewProjectName: name }),
 }));
