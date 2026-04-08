@@ -251,6 +251,12 @@ export function listGmailLabels(credentialId: string) {
   return request<GmailLabel[]>(`/gmail/labels?credentialId=${encodeURIComponent(credentialId)}`);
 }
 
+export function listGmailMessageLabels(credentialId: string, messageId: string) {
+  return request<GmailLabel[]>(
+    `/gmail/message/labels?credentialId=${encodeURIComponent(credentialId)}&messageId=${encodeURIComponent(messageId)}`
+  );
+}
+
 // ── Slack data ────────────────────────────────────────────────
 
 export function listSlackChannels(credentialId: string) {

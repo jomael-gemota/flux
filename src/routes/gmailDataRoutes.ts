@@ -38,4 +38,44 @@ export async function gmailDataRoutes(
             return reply.send(labels);
         }
     );
+
+    /**
+     * GET /gmail/message/labels?credentialId=xxx&messageId=yyy
+     * Returns only the labels currently applied to a specific message,
+     * enriched with their human-readable names from labels.list.
+     */
+    fastify.get<{ Querystring: { credentialId: string; messageId: string } }>(
+        '/gmail/message/labels',
+        async (request, reply) => {
+            const { credentialId, messageId } = request.query;
+            if (!credentialId) return reply.badRequest('credentialId is required');
+            if (!messageId)    return reply.badRequest('messageId is required');
+
+            const auth  = await googleAuth.getAuthenticatedClient(credentialId);
+            const gmail = google.gmail({ version: 'v1', auth });
+
+            // Fetch both in parallel — message metadata and full label catalogue
+            const [msgRes, allLabelsRes] = await Promise.all([
+                gmail.users.messages.get({ userId: 'me', id: messageId, format: 'metadata' }),
+                gmail.users.labels.list({ userId: 'me' }),
+            ]);
+
+            const msgLabelIds  = msgRes.data.labelIds ?? [];
+            const allLabels    = allLabelsRes.data.labels ?? [];
+            const labelMap     = new Map(allLabels.map((l) => [l.id!, { name: l.name ?? l.id!, type: l.type ?? 'user' }]));
+
+            const labels = msgLabelIds
+                .map((id) => ({
+                    id,
+                    name: labelMap.get(id)?.name ?? id,
+                    type: labelMap.get(id)?.type ?? 'user',
+                }))
+                .sort((a, b) => {
+                    if (a.type !== b.type) return a.type === 'system' ? -1 : 1;
+                    return a.name.localeCompare(b.name);
+                });
+
+            return reply.send(labels);
+        }
+    );
 }
