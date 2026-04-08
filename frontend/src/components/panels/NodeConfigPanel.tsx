@@ -3544,6 +3544,45 @@ function GmailAttachmentInput({ cfg, onChange, otherNodes, testResults }: {
         </p>
       )}
 
+      {/* Per-file size indicator — matches Gmail's 25 MB inline limit */}
+      {entries.some((e) => e.source === 'upload' && e.data) && (() => {
+        // Gmail limit: 25 MB decoded. base64 length × 0.75 ≈ decoded bytes.
+        const GMAIL_LIMIT = 25 * 1024 * 1024;
+        const oversized = entries.filter(
+          (e) => e.source === 'upload' && e.data &&
+                 Math.ceil(e.data.length * 0.75) > GMAIL_LIMIT
+        );
+        const undersized = entries.filter(
+          (e) => e.source === 'upload' && e.data &&
+                 Math.ceil(e.data.length * 0.75) <= GMAIL_LIMIT
+        );
+        return (
+          <div className="space-y-1.5">
+            {undersized.length > 0 && (
+              <div className="flex gap-2 rounded-md border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-2">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                <p className="text-[10px] text-emerald-700 dark:text-emerald-300 leading-relaxed">
+                  {undersized.length} file{undersized.length > 1 ? 's' : ''} within Gmail's 25 MB limit — will be attached directly.
+                </p>
+              </div>
+            )}
+            {oversized.length > 0 && (
+              <div className="flex gap-2 rounded-md border border-blue-200 dark:border-blue-800/40 bg-blue-50 dark:bg-blue-900/20 px-3 py-2">
+                <Info className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
+                <div className="text-[10px] text-blue-700 dark:text-blue-300 leading-relaxed space-y-0.5">
+                  <p><strong>{oversized.length} file{oversized.length > 1 ? 's' : ''} exceed{oversized.length === 1 ? 's' : ''} Gmail's 25 MB limit</strong> — just like Gmail itself, these will be automatically uploaded to Google Drive and a download link will be inserted into the email body.</p>
+                  <ul className="pl-3 list-disc space-y-0.5 mt-1">
+                    {oversized.map((e) => (
+                      <li key={e.id}>{e.filename} ({(Math.ceil(e.data.length * 0.75) / 1024 / 1024).toFixed(1)} MB)</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       <div className="space-y-2">
         {entries.map((att) => (
           <div key={att.id}
@@ -3835,10 +3874,9 @@ function GmailLabelIdsInput({ cfg, onChange }: {
 // When the message ID is a variable expression: shows all account labels so
 // the user can still pre-select which ones to remove at runtime.
 
-function GmailRemoveLabelInput({ cfg, onChange, otherNodes, testResults }: {
+function GmailRemoveLabelInput({ cfg, onChange, testResults }: {
   cfg: Record<string, unknown>;
   onChange: (p: Partial<Record<string, unknown>>) => void;
-  otherNodes: CanvasNode[];
   testResults: Record<string, NodeTestResult>;
 }) {
   const credentialId  = String(cfg.credentialId ?? '');
@@ -4232,7 +4270,7 @@ function GmailConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
         <>
           <GmailMessageIdInput cfg={cfg} onChange={onChange} otherNodes={otherNodes}
             testResults={testResults} placeholder="ID of the message to modify" />
-          <GmailRemoveLabelInput cfg={cfg} onChange={onChange} otherNodes={otherNodes} testResults={testResults} />
+          <GmailRemoveLabelInput cfg={cfg} onChange={onChange} testResults={testResults} />
         </>
       )}
 

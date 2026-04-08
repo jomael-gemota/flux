@@ -1,4 +1,5 @@
 import { google } from 'googleapis';
+import { Readable } from 'stream';
 import { NodeExecutor } from '../engine/NodeExecutor';
 import { WorkflowNode, ExecutionContext } from '../types/workflow.types';
 import { GoogleAuthService } from '../services/GoogleAuthService';
@@ -231,17 +232,81 @@ export class GmailNode implements NodeExecutor {
                 .filter((att) => att.filename && att.data);  // skip incomplete entries
         };
 
+        /**
+         * Gmail's attachment limit is 25 MB (decoded binary).
+         * Files that exceed this are uploaded to Google Drive and a link is
+         * appended to the email body, matching Gmail's own behaviour.
+         */
+        const GMAIL_ATTACH_LIMIT = 25 * 1024 * 1024; // 25 MB
+
+        const routeAttachments = async (
+            resolved: Array<{ filename: string; mimeType?: string; data: string }>,
+            bodyText: string,
+        ): Promise<{
+            inlineAttachments: Array<{ filename: string; mimeType?: string; data: string }>;
+            finalBody: string;
+        }> => {
+            if (resolved.length === 0) return { inlineAttachments: [], finalBody: bodyText };
+
+            const drive = google.drive({ version: 'v3', auth });
+            const inline: typeof resolved  = [];
+            const driveLinks: string[]     = [];
+
+            for (const att of resolved) {
+                // Strip data-URL prefix if present, then measure decoded size
+                const b64          = att.data.includes(',') ? att.data.split(',')[1] : att.data;
+                const decodedBytes = Math.ceil(b64.length * 0.75);
+
+                if (decodedBytes <= GMAIL_ATTACH_LIMIT) {
+                    inline.push(att);
+                    continue;
+                }
+
+                // File exceeds 25 MB → upload to Google Drive
+                const mimeType = att.mimeType || guessMime(att.filename);
+                const buffer   = Buffer.from(b64, 'base64');
+
+                const uploadRes = await drive.files.create({
+                    requestBody: { name: att.filename },
+                    media:       { mimeType, body: Readable.from(buffer) },
+                    fields:      'id,webViewLink',
+                });
+
+                // Make the file accessible to anyone with the link
+                await drive.permissions.create({
+                    fileId:      uploadRes.data.id!,
+                    requestBody: { role: 'reader', type: 'anyone' },
+                });
+
+                const sizeMB = (decodedBytes / 1024 / 1024).toFixed(1);
+                driveLinks.push(
+                    `📎 ${att.filename} (${sizeMB} MB — too large to attach directly, uploaded to Google Drive): ${uploadRes.data.webViewLink}`
+                );
+            }
+
+            const finalBody = driveLinks.length > 0
+                ? `${bodyText}\n\n--- Large files attached via Google Drive ---\n${driveLinks.join('\n')}`
+                : bodyText;
+
+            return { inlineAttachments: inline, finalBody };
+        };
+
         // ── send ───────────────────────────────────────────────────────────────
 
         if (action === 'send') {
+            const bodyText = this.resolver.resolveTemplate(config.body ?? '', context);
+            const { inlineAttachments, finalBody } = await routeAttachments(
+                resolveAttachments(config.attachments),
+                bodyText,
+            );
             const raw = buildRaw({
                 to:          resolveAddresses(config.to) ?? '',
                 cc:          resolveAddresses(config.cc),
                 bcc:         resolveAddresses(config.bcc),
                 subject:     this.resolver.resolveTemplate(config.subject ?? '', context),
-                body:        this.resolver.resolveTemplate(config.body    ?? '', context),
+                body:        finalBody,
                 isHtml:      config.isHtml,
-                attachments: resolveAttachments(config.attachments),
+                attachments: inlineAttachments,
             });
             const res = await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
             return { messageId: res.data.id, threadId: res.data.threadId, labelIds: res.data.labelIds };
@@ -320,14 +385,19 @@ export class GmailNode implements NodeExecutor {
             const replySubject  = origSubject.startsWith('Re:') ? origSubject : `Re: ${origSubject}`;
             const references    = [origRefs, origMessageId].filter(Boolean).join(' ');
 
+            const replyBodyText = this.resolver.resolveTemplate(config.body ?? '', context);
+            const { inlineAttachments: replyInline, finalBody: replyFinalBody } = await routeAttachments(
+                resolveAttachments(config.attachments),
+                replyBodyText,
+            );
             const raw = buildRaw({
                 to:          origFrom,
                 subject:     replySubject,
-                body:        this.resolver.resolveTemplate(config.body ?? '', context),
+                body:        replyFinalBody,
                 isHtml:      config.isHtml,
                 inReplyTo:   origMessageId,
                 references,
-                attachments: resolveAttachments(config.attachments),
+                attachments: replyInline,
             });
 
             const res = await gmail.users.messages.send({

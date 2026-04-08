@@ -135,6 +135,9 @@ async function bootstrap() {
     const fastify = Fastify({
 		logger: true,
 		genReqId: () => crypto.randomUUID(),
+		// Raise from the default 1 MB to 50 MB to accommodate base64-encoded
+		// file attachments stored inside workflow node configs.
+		bodyLimit: 50 * 1024 * 1024,
 	});
 
     await fastify.register(cors, { origin: process.env.CORS_ORIGIN ?? '*', credentials: true });

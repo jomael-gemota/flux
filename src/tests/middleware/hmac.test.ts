@@ -13,12 +13,12 @@ function makeRequest(
     workflowId: string,
     body: unknown,
     signature: string | undefined
-): FastifyRequest {
+): FastifyRequest<{ Params: { workflowId: string } }> {
     return {
         params: { workflowId },
         headers: signature ? { 'x-webhook-signature': signature } : {},
         body,
-    } as unknown as FastifyRequest;
+    } as unknown as FastifyRequest<{ Params: { workflowId: string } }>;
 }
 
 function buildSignature(secret: string, body: unknown): string {
