@@ -8,7 +8,7 @@ import type { NodeTestResult } from '../../types/workflow';
 import { useCredentialList } from '../../hooks/useCredentials';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { useSaveWorkflow } from '../../hooks/useSaveWorkflow';
-import { useGmailLabels, useGmailMessageLabels } from '../../hooks/useGmailData';
+import { useGmailLabels, useGmailMessageLabels, isExpression } from '../../hooks/useGmailData';
 import { useSlackChannels, useSlackUsers } from '../../hooks/useSlackData';
 import { useTeamsTeams, useTeamsChannels, useTeamsUsers } from '../../hooks/useTeamsData';
 import { useBasecampProjects, useBasecampTodolists, useBasecampTodos, useBasecampTodoGroups, useBasecampPeople } from '../../hooks/useBasecampData';
@@ -3550,23 +3550,6 @@ function GmailLabelIdsInput({ cfg, onChange, otherNodes, testResults }: {
         </div>
       )}
 
-      {/* ── Manual / expression entry fallback ── */}
-      <details className="group">
-        <summary className="cursor-pointer text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline select-none list-none flex items-center gap-1">
-          <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
-          Add label ID manually or insert a variable
-        </summary>
-        <div className="mt-1.5">
-          <EmailTagInput
-            label=""
-            value={labelIds}
-            onChange={(v) => onChange({ labelIds: v })}
-            placeholder="Type a label ID and press Enter…"
-            nodes={otherNodes}
-            testResults={testResults}
-          />
-        </div>
-      </details>
     </div>
   );
 }
@@ -3620,6 +3603,13 @@ function GmailRemoveLabelInput({ cfg, onChange, otherNodes, testResults }: {
             Enter a Message ID above — the labels applied to that message will appear here.
           </p>
         </div>
+      ) : isExpression(messageId) ? (
+        <div className="flex gap-2 rounded-md border border-violet-200 dark:border-violet-800/40 bg-violet-50 dark:bg-violet-900/20 px-3 py-2">
+          <Braces className="w-3.5 h-3.5 text-violet-500 flex-shrink-0 mt-0.5" />
+          <p className="text-[10px] text-violet-700 dark:text-violet-300 leading-relaxed">
+            The Message ID is set to a variable expression. Labels will be loaded at runtime when the workflow runs. The label IDs selected during the workflow run will be available for removal.
+          </p>
+        </div>
       ) : isLoading || isFetching ? (
         <div className="flex items-center gap-2 py-2 text-xs text-zinc-500 dark:text-zinc-400">
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -3629,7 +3619,7 @@ function GmailRemoveLabelInput({ cfg, onChange, otherNodes, testResults }: {
         <div className="flex gap-2 rounded-md border border-red-200 dark:border-red-800/40 bg-red-50 dark:bg-red-900/20 px-3 py-2">
           <AlertCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-0.5" />
           <p className="text-[10px] text-red-700 dark:text-red-300 leading-relaxed">
-            Could not load labels for that message. Check the message ID, or use the manual entry below.
+            Could not load labels for that message. Please check the message ID and try again.
           </p>
         </div>
       ) : (msgLabels ?? []).length === 0 ? (
@@ -3720,23 +3710,6 @@ function GmailRemoveLabelInput({ cfg, onChange, otherNodes, testResults }: {
         </div>
       )}
 
-      {/* Manual / variable fallback */}
-      <details className="group">
-        <summary className="cursor-pointer text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline select-none list-none flex items-center gap-1">
-          <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
-          Add label ID manually or insert a variable
-        </summary>
-        <div className="mt-1.5">
-          <EmailTagInput
-            label=""
-            value={labelIds}
-            onChange={(v) => onChange({ labelIds: v })}
-            placeholder="Type a label ID and press Enter…"
-            nodes={otherNodes}
-            testResults={testResults}
-          />
-        </div>
-      </details>
     </div>
   );
 }
