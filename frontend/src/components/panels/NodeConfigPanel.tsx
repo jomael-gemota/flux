@@ -3421,11 +3421,9 @@ function GmailMessageIdInput({ cfg, onChange, otherNodes, testResults, label = '
 }
 
 /** Label IDs tag input with a hint about finding them */
-function GmailLabelIdsInput({ cfg, onChange, otherNodes, testResults }: {
+function GmailLabelIdsInput({ cfg, onChange }: {
   cfg: Record<string, unknown>;
   onChange: (p: Partial<Record<string, unknown>>) => void;
-  otherNodes: CanvasNode[];
-  testResults: Record<string, NodeTestResult>;
 }) {
   const credentialId  = String(cfg.credentialId ?? '');
   const labelIds      = (cfg.labelIds as string[] | undefined) ?? [];
@@ -3558,11 +3556,9 @@ function GmailLabelIdsInput({ cfg, onChange, otherNodes, testResults }: {
 // Shows only the labels currently applied to the chosen message so the user
 // can pick which ones to remove. Falls back to a manual tag input.
 
-function GmailRemoveLabelInput({ cfg, onChange, otherNodes, testResults }: {
+function GmailRemoveLabelInput({ cfg, onChange }: {
   cfg: Record<string, unknown>;
   onChange: (p: Partial<Record<string, unknown>>) => void;
-  otherNodes: CanvasNode[];
-  testResults: Record<string, NodeTestResult>;
 }) {
   const credentialId = String(cfg.credentialId ?? '');
   const messageId    = String(cfg.messageId ?? '');
@@ -3921,7 +3917,7 @@ function GmailConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
         <>
           <GmailMessageIdInput cfg={cfg} onChange={onChange} otherNodes={otherNodes}
             testResults={testResults} placeholder="ID of the message to label" />
-          <GmailLabelIdsInput cfg={cfg} onChange={onChange} otherNodes={otherNodes} testResults={testResults} />
+          <GmailLabelIdsInput cfg={cfg} onChange={onChange} />
         </>
       )}
 
@@ -3930,7 +3926,7 @@ function GmailConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
         <>
           <GmailMessageIdInput cfg={cfg} onChange={onChange} otherNodes={otherNodes}
             testResults={testResults} placeholder="ID of the message to modify" />
-          <GmailRemoveLabelInput cfg={cfg} onChange={onChange} otherNodes={otherNodes} testResults={testResults} />
+          <GmailRemoveLabelInput cfg={cfg} onChange={onChange} />
         </>
       )}
 
