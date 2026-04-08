@@ -43,6 +43,38 @@ async function request<T>(
   return res.json() as Promise<T>;
 }
 
+// ── Projects ─────────────────────────────────────────────────
+
+export interface Project {
+  id: string;
+  name: string;
+  workflowIds: string[];
+}
+
+export function listProjects() {
+  return request<Project[]>('/projects');
+}
+
+export function createProject(body: { name: string; workflowIds?: string[]; id?: string }) {
+  return request<Project>('/projects', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateProject(id: string, body: { name?: string; workflowIds?: string[] }) {
+  return request<Project>(`/projects/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteProject(id: string) {
+  return request<{ deleted: boolean; id: string }>(`/projects/${id}`, {
+    method: 'DELETE',
+  });
+}
+
 // ── Workflows ────────────────────────────────────────────────
 
 export function listWorkflows(limit = 50, cursor?: string) {

@@ -5,45 +5,29 @@ import {
   GripVertical,
 } from 'lucide-react';
 import { useWorkflowList, useDeleteWorkflow, useUpdateWorkflow } from '../hooks/useWorkflows';
+import { useProjectList, useCreateProject, useUpdateProject, useDeleteProject } from '../hooks/useProjects';
 import { ConfirmModal } from './ui/ConfirmModal';
 import { useWorkflowStore } from '../store/workflowStore';
+import { useAuthStore } from '../store/authStore';
 import { deserialize } from './canvas/canvasUtils';
 import type { WorkflowDefinition } from '../types/workflow';
+import type { Project } from '../api/client';
 
-// ── Project types & persistence ───────────────────────────────────────────────
+// ── Open-project accordion state (UI only — stays in localStorage) ────────────
 
-interface Project {
-  id: string;
-  name: string;
-  workflowIds: string[];
-}
+const openProjectsKey = (uid: string) => `wap_open_projects_${uid}`;
 
-const PROJECTS_KEY = 'wap_projects';
-const OPEN_PROJECTS_KEY = 'wap_open_projects';
-
-function loadProjects(): Project[] {
+function loadOpenProjects(uid: string): Set<string> {
   try {
-    return JSON.parse(localStorage.getItem(PROJECTS_KEY) ?? '[]');
-  } catch {
-    return [];
-  }
-}
-
-function saveProjects(projects: Project[]) {
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
-}
-
-function loadOpenProjects(): Set<string> {
-  try {
-    const arr = JSON.parse(localStorage.getItem(OPEN_PROJECTS_KEY) ?? '[]') as string[];
+    const arr = JSON.parse(localStorage.getItem(openProjectsKey(uid)) ?? '[]') as string[];
     return new Set(arr);
   } catch {
     return new Set();
   }
 }
 
-function saveOpenProjects(ids: Set<string>) {
-  localStorage.setItem(OPEN_PROJECTS_KEY, JSON.stringify([...ids]));
+function saveOpenProjects(ids: Set<string>, uid: string) {
+  localStorage.setItem(openProjectsKey(uid), JSON.stringify([...ids]));
 }
 
 function newId() {
@@ -371,8 +355,16 @@ export function WorkflowSidebar() {
     setPendingNewProjectName,
   } = useWorkflowStore();
 
-  const [projects, setProjectsState] = useState<Project[]>(loadProjects);
-  const [openProjects, setOpenProjects] = useState<Set<string>>(loadOpenProjects);
+  const userId = useAuthStore((s) => s.user?.id ?? '');
+
+  // ── Project data from the API (user-scoped by the backend) ─────────────────
+  const { data: projects = [] } = useProjectList();
+  const createProjectMutation   = useCreateProject();
+  const updateProjectMutation   = useUpdateProject();
+  const deleteProjectMutation   = useDeleteProject();
+
+  // Accordion open/close state lives in localStorage (pure UI state, not data)
+  const [openProjects, setOpenProjects] = useState<Set<string>>(() => loadOpenProjects(userId));
   const [creatingProject, setCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const newProjectInputRef = useRef<HTMLInputElement>(null);
@@ -402,8 +394,11 @@ export function WorkflowSidebar() {
     setModal({ open: true, title, message, confirmLabel, danger, onConfirm: () => { closeModal(); onConfirm(); } });
   }
 
-  useEffect(() => { saveProjects(projects); }, [projects]);
-  useEffect(() => { saveOpenProjects(openProjects); }, [openProjects]);
+  // Persist accordion state whenever it changes or the user switches.
+  useEffect(() => { if (userId) saveOpenProjects(openProjects, userId); }, [openProjects, userId]);
+
+  // When the user changes, reload the accordion state for that account.
+  useEffect(() => { setOpenProjects(loadOpenProjects(userId)); }, [userId]);
 
   // React to a project name submitted from the canvas modal
   useEffect(() => {
@@ -412,8 +407,9 @@ export function WorkflowSidebar() {
     setPendingNewProjectName(null);
     if (!name) return;
     const id = newId();
-    setProjectsState((prev) => [...prev, { id, name, workflowIds: [] }]);
-    setOpenProjects((prev) => new Set([...prev, id]));
+    createProjectMutation.mutate({ name, id }, {
+      onSuccess: () => setOpenProjects((prev) => new Set([...prev, id])),
+    });
   }, [pendingNewProjectName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -511,9 +507,12 @@ export function WorkflowSidebar() {
       'Delete', true,
       () => {
         deleteWf.mutate(wf.id);
-        setProjectsState((prev) =>
-          prev.map((p) => ({ ...p, workflowIds: p.workflowIds.filter((id) => id !== wf.id) }))
-        );
+        // Remove this workflow from any project that references it
+        projects
+          .filter((p) => p.workflowIds.includes(wf.id))
+          .forEach((p) =>
+            updateProjectMutation.mutate({ id: p.id, workflowIds: p.workflowIds.filter((id) => id !== wf.id) })
+          );
         if (activeWorkflow?.id === wf.id) {
           setActiveWorkflow(null);
           setNodes([]);
@@ -529,16 +528,15 @@ export function WorkflowSidebar() {
     const name = newProjectName.trim();
     if (!name) { setCreatingProject(false); return; }
     const id = newId();
-    setProjectsState((prev) => [...prev, { id, name, workflowIds: [] }]);
-    setOpenProjects((prev) => new Set([...prev, id]));
+    createProjectMutation.mutate({ name, id }, {
+      onSuccess: () => setOpenProjects((prev) => new Set([...prev, id])),
+    });
     setNewProjectName('');
     setCreatingProject(false);
   }
 
   function renameProject(projectId: string, name: string) {
-    setProjectsState((prev) =>
-      prev.map((p) => (p.id === projectId ? { ...p, name } : p))
-    );
+    updateProjectMutation.mutate({ id: projectId, name });
   }
 
   function deleteProject(projectId: string) {
@@ -547,7 +545,7 @@ export function WorkflowSidebar() {
       'The project will be removed. Workflows inside will become ungrouped and are not deleted.',
       'Delete', true,
       () => {
-        setProjectsState((prev) => prev.filter((p) => p.id !== projectId));
+        deleteProjectMutation.mutate(projectId);
         setOpenProjects((prev) => { const s = new Set(prev); s.delete(projectId); return s; });
       },
     );
@@ -574,18 +572,18 @@ export function WorkflowSidebar() {
     e.preventDefault();
     const wfId = e.dataTransfer.getData('wap/workflow-id');
     if (!wfId) return;
-    setProjectsState((prev) =>
-      prev.map((p) => {
-        if (p.id === projectId) {
-          // Add to target if not already there
-          return p.workflowIds.includes(wfId)
-            ? p
-            : { ...p, workflowIds: [...p.workflowIds, wfId] };
+
+    // Remove from any project that currently contains this workflow,
+    // then add to the target project.
+    projects.forEach((p) => {
+      if (p.id === projectId) {
+        if (!p.workflowIds.includes(wfId)) {
+          updateProjectMutation.mutate({ id: p.id, workflowIds: [...p.workflowIds, wfId] });
         }
-        // Remove from all other projects
-        return { ...p, workflowIds: p.workflowIds.filter((id) => id !== wfId) };
-      })
-    );
+      } else if (p.workflowIds.includes(wfId)) {
+        updateProjectMutation.mutate({ id: p.id, workflowIds: p.workflowIds.filter((id) => id !== wfId) });
+      }
+    });
     setDraggingWfId(null);
   }
 
@@ -594,9 +592,9 @@ export function WorkflowSidebar() {
     const wfId = e.dataTransfer.getData('wap/workflow-id');
     if (!wfId) return;
     // Remove from all projects (makes it ungrouped)
-    setProjectsState((prev) =>
-      prev.map((p) => ({ ...p, workflowIds: p.workflowIds.filter((id) => id !== wfId) }))
-    );
+    projects
+      .filter((p) => p.workflowIds.includes(wfId))
+      .forEach((p) => updateProjectMutation.mutate({ id: p.id, workflowIds: p.workflowIds.filter((id) => id !== wfId) }));
     setUngroupedDragOver(false);
     setDraggingWfId(null);
   }
@@ -622,13 +620,10 @@ export function WorkflowSidebar() {
     const project = projects.find((p) => p.id === pendingProjectId);
     if (!project || project.workflowIds.includes(currentId)) return;
 
-    setProjectsState((prev) =>
-      prev.map((p) =>
-        p.id === pendingProjectId
-          ? { ...p, workflowIds: [...p.workflowIds, currentId] }
-          : p
-      )
-    );
+    updateProjectMutation.mutate({
+      id: pendingProjectId,
+      workflowIds: [...project.workflowIds, currentId],
+    });
     sessionStorage.removeItem('wap_new_wf_project');
   }, [activeWorkflow?.id, projects]);
 

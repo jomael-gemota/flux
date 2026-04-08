@@ -85,7 +85,7 @@ export class WorkflowRepository {
         }
 
         await WorkflowModel.updateOne(
-            { workflowId: id },
+            workflowFilter(id, userId),
             {
                 $set: {
                     name: candidate.name,
