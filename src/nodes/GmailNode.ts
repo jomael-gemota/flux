@@ -9,15 +9,20 @@ type GmailAction = 'send' | 'list' | 'read';
 interface GmailConfig {
     credentialId: string;
     action: GmailAction;
-    // send
-    to?: string;
-    cc?: string;
-    bcc?: string;
+    // send — to/cc/bcc accept a string (legacy) or array of addresses
+    to?: string | string[];
+    cc?: string | string[];
+    bcc?: string | string[];
     subject?: string;
     body?: string;
     isHtml?: boolean;
-    // list
-    query?: string;
+    // list — user-friendly filter fields (translated to a Gmail query on the fly)
+    readStatus?: 'all' | 'read' | 'unread';
+    fromFilter?: string | string[];   // single address/name, or multiple (joined with OR)
+    subjectFilter?: string;
+    bodyFilter?: string;
+    hasAttachment?: boolean;
+    attachmentTypes?: string[];   // 'image' | 'pdf' | 'docs' | 'sheets'
     maxResults?: number;
     // read
     messageId?: string;
@@ -41,12 +46,26 @@ export class GmailNode implements NodeExecutor {
         const auth   = await this.googleAuth.getAuthenticatedClient(credentialId);
         const gmail  = google.gmail({ version: 'v1', auth });
 
+        // Helper: resolve a to/cc/bcc value that may be a string or string array.
+        const resolveAddresses = (raw: string | string[] | undefined): string | undefined => {
+            if (!raw) return undefined;
+            if (Array.isArray(raw)) {
+                const resolved = raw
+                    .map((a) => this.resolver.resolveTemplate(a, context))
+                    .filter(Boolean)
+                    .join(', ');
+                return resolved || undefined;
+            }
+            const resolved = this.resolver.resolveTemplate(raw, context);
+            return resolved || undefined;
+        };
+
         if (action === 'send') {
-            const to      = this.resolver.resolveTemplate(config.to ?? '', context);
+            const to      = resolveAddresses(config.to) ?? '';
             const subject = this.resolver.resolveTemplate(config.subject ?? '', context);
             const body    = this.resolver.resolveTemplate(config.body ?? '', context);
-            const cc      = config.cc ? this.resolver.resolveTemplate(config.cc, context) : undefined;
-            const bcc     = config.bcc ? this.resolver.resolveTemplate(config.bcc, context) : undefined;
+            const cc      = resolveAddresses(config.cc);
+            const bcc     = resolveAddresses(config.bcc);
 
             const contentType = config.isHtml ? 'text/html' : 'text/plain';
 
@@ -81,37 +100,123 @@ export class GmailNode implements NodeExecutor {
         }
 
         if (action === 'list') {
-            const query      = this.resolver.resolveTemplate(config.query ?? '', context);
             const maxResults = config.maxResults ?? 10;
+
+            // Shared body-extraction helper (mirrors the 'read' action logic).
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const getPart = (parts: any[] | null | undefined, mimeType: string): string => {
+                for (const part of parts ?? []) {
+                    if (part.mimeType === mimeType && part.body?.data) {
+                        return Buffer.from(part.body.data, 'base64').toString('utf-8');
+                    }
+                    if (part.parts) {
+                        const found = getPart(part.parts, mimeType);
+                        if (found) return found;
+                    }
+                }
+                return '';
+            };
+
+            // Build a Gmail search query from the user-friendly filter fields.
+            const queryParts: string[] = [];
+
+            if (config.readStatus === 'read')   queryParts.push('is:read');
+            if (config.readStatus === 'unread') queryParts.push('is:unread');
+
+            // fromFilter may be a single string or an array of addresses/names
+            const resolvedFroms: string[] = Array.isArray(config.fromFilter)
+                ? config.fromFilter
+                    .map((f) => this.resolver.resolveTemplate(f, context))
+                    .filter(Boolean)
+                : config.fromFilter
+                    ? [this.resolver.resolveTemplate(config.fromFilter, context)].filter(Boolean)
+                    : [];
+
+            const subjectFilter = config.subjectFilter ? this.resolver.resolveTemplate(config.subjectFilter, context) : '';
+            const bodyFilter    = config.bodyFilter    ? this.resolver.resolveTemplate(config.bodyFilter, context)    : '';
+
+            if (resolvedFroms.length === 1) {
+                queryParts.push(`from:(${resolvedFroms[0]})`);
+            } else if (resolvedFroms.length > 1) {
+                // Multiple senders: match emails from ANY of them
+                queryParts.push(`{${resolvedFroms.map((f) => `from:${f}`).join(' ')}}`);
+            }
+            if (subjectFilter) queryParts.push(`subject:(${subjectFilter})`);
+            if (bodyFilter)    queryParts.push(`"${bodyFilter}"`);
+
+            if (config.hasAttachment) {
+                queryParts.push('has:attachment');
+                const typeMap: Record<string, string> = {
+                    image:  'filename:(jpg OR jpeg OR png OR gif OR bmp OR webp)',
+                    pdf:    'filename:pdf',
+                    docs:   'filename:(doc OR docx)',
+                    sheets: 'filename:(xls OR xlsx OR csv)',
+                };
+                (config.attachmentTypes ?? []).forEach((t) => {
+                    if (typeMap[t]) queryParts.push(typeMap[t]);
+                });
+            }
+
+            const query = queryParts.join(' ');
+
+            // Step 1: run the search to find messages matching the filters
             const res = await gmail.users.messages.list({
                 userId: 'me',
                 q: query || undefined,
                 maxResults,
             });
-            const messages = res.data.messages ?? [];
-            // Fetch snippet for each message
-            const details = await Promise.all(
-                messages.map(async (m) => {
-                    const detail = await gmail.users.messages.get({
+            const matchedRefs = res.data.messages ?? [];
+
+            // Step 2: collect unique thread IDs from the matched messages
+            const seenThreadIds = new Set<string>();
+            for (const m of matchedRefs) {
+                if (m.threadId) seenThreadIds.add(m.threadId);
+            }
+
+            // Step 3: fetch every thread in full so the caller gets the complete
+            //         conversation, including the full body of every message.
+            const threads = await Promise.all(
+                [...seenThreadIds].map(async (threadId) => {
+                    const thread = await gmail.users.threads.get({
                         userId: 'me',
-                        id: m.id!,
-                        format: 'metadata',
-                        metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+                        id: threadId,
+                        format: 'full',   // full payload so we can decode the body
                     });
-                    const headers = detail.data.payload?.headers ?? [];
-                    const h = (name: string) => headers.find((x) => x.name === name)?.value ?? '';
-                    return {
-                        id:       m.id,
-                        threadId: m.threadId,
-                        subject:  h('Subject'),
-                        from:     h('From'),
-                        to:       h('To'),
-                        date:     h('Date'),
-                        snippet:  detail.data.snippet,
-                    };
+                    const msgs = (thread.data.messages ?? []).map((m) => {
+                        const headers = m.payload?.headers ?? [];
+                        const h = (name: string) =>
+                            headers.find((x) => x.name === name)?.value ?? '';
+
+                        // Extract the complete plain-text (or HTML) body
+                        const body =
+                            getPart(m.payload?.parts, 'text/plain') ||
+                            getPart(m.payload?.parts, 'text/html') ||
+                            (m.payload?.body?.data
+                                ? Buffer.from(m.payload.body.data, 'base64').toString('utf-8')
+                                : '');
+
+                        return {
+                            id:       m.id,
+                            threadId: m.threadId ?? threadId,
+                            subject:  h('Subject'),
+                            from:     h('From'),
+                            to:       h('To'),
+                            date:     h('Date'),
+                            snippet:  m.snippet,
+                            body,
+                        };
+                    });
+                    return { threadId, messages: msgs };
                 })
             );
-            return { messages: details, total: res.data.resultSizeEstimate };
+
+            const totalMessages = threads.reduce((s, t) => s + t.messages.length, 0);
+            return {
+                threads,
+                totalThreads:    threads.length,
+                totalMessages,
+                matchedMessages: matchedRefs.length,
+            };
         }
 
         if (action === 'read') {

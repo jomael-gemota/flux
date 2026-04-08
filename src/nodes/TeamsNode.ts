@@ -125,10 +125,12 @@ export class TeamsNode implements NodeExecutor {
                 .get() as { value: Array<Record<string, unknown>> };
 
             const messages = (res.value ?? []).map((m) => ({
-                id:        m.id,
-                text:      (m.body as { content?: string } | undefined)?.content,
-                from:      (m.from as { user?: { displayName?: string } } | undefined)?.user?.displayName,
-                createdAt: m.createdDateTime,
+                id:         m.id,
+                text:       (m.body as { content?: string } | undefined)?.content,
+                from:       (m.from as { user?: { displayName?: string } } | undefined)?.user?.displayName,
+                createdAt:  m.createdDateTime,
+                // replyToId is null for top-level messages, populated for thread replies
+                replyToId:  (m.replyToId as string | null | undefined) ?? undefined,
             }));
 
             return { messages, count: messages.length };

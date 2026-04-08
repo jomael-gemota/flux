@@ -1,5 +1,5 @@
-import { Settings2, Star, Braces, Play, Loader2, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Clock, Copy, Check, ArrowRight, Power, X, AlertTriangle, Save } from 'lucide-react';
-import { useRef, useState, useEffect, useMemo } from 'react';
+import { Settings2, Star, Braces, Play, Loader2, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Clock, Copy, Check, ArrowRight, Power, X, AlertTriangle, Save, Wand2, Info } from 'lucide-react';
+import { useRef, useState, useEffect, useMemo, type ReactNode } from 'react';
 import { useWorkflowStore } from '../../store/workflowStore';
 import type { CanvasNode } from '../../store/workflowStore';
 import { Select } from '../ui/Input';
@@ -329,6 +329,7 @@ function ExpressionTextArea({
   onChange,
   nodes,
   testResults,
+  resizable = false,
 }: {
   label: string;
   value: string;
@@ -337,6 +338,7 @@ function ExpressionTextArea({
   onChange: (v: string) => void;
   nodes: CanvasNode[];
   testResults: Record<string, NodeTestResult>;
+  resizable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -396,7 +398,7 @@ function ExpressionTextArea({
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        className={`w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none ${showDisplay ? 'sr-only' : ''}`}
+        className={`w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${resizable ? 'resize-y min-h-[80px]' : 'resize-none'} ${showDisplay ? 'sr-only' : ''}`}
       />
       {open && (
         <VariablePickerPanel nodes={nodes} testResults={testResults} onInsert={handleInsert} />
@@ -581,7 +583,7 @@ function HttpResultDisplay({ result }: { result: NodeTestResult }) {
             </span>
             <CopyButton text={bodyStr} />
           </div>
-          <pre className="bg-slate-100 dark:bg-slate-800 rounded-md p-2.5 text-[10px] text-slate-700 dark:text-slate-300 font-mono overflow-auto max-h-44 leading-relaxed whitespace-pre-wrap break-all">
+          <pre className="bg-slate-100 dark:bg-slate-800 rounded-md p-2.5 text-[10px] text-slate-800 dark:text-slate-100 font-mono overflow-auto leading-relaxed whitespace-pre-wrap break-all">
             {bodyStr}
           </pre>
         </div>
@@ -728,52 +730,1105 @@ function SwitchResultDisplay({ result }: { result: NodeTestResult }) {
   );
 }
 
-// ── Generic result (transform / output / trigger / fallback) ──────────────────
+// ── Shared result display utilities ──────────────────────────────────────────
 
-function GenericResultDisplay({ result }: { result: NodeTestResult }) {
-  const out = result.output;
-  const outStr = JSON.stringify(out, null, 2);
+function fmtDate(iso: string | undefined | null): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+  } catch { return iso; }
+}
 
-  if (typeof out === 'string') {
+function fmtBytes(bytes: number | string | undefined | null): string {
+  if (bytes == null) return '—';
+  const n = Number(bytes);
+  if (isNaN(n)) return String(bytes);
+  if (n < 1024) return `${n} B`;
+  if (n < 1_048_576) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1_048_576).toFixed(1)} MB`;
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-[10px] font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
+      {children}
+    </p>
+  );
+}
+
+function SuccessBanner({ text, sub }: { text: string; sub?: string }) {
+  return (
+    <div className="flex items-start gap-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/40 rounded-lg px-3 py-2.5">
+      <CheckCircle2 className="w-4 h-4 text-emerald-500 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+      <div>
+        <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">{text}</p>
+        {sub && <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-mono">{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({
+  label, value, mono = false, url = false,
+}: {
+  label: string; value?: string | number | null; mono?: boolean; url?: boolean;
+}) {
+  if (value == null || value === '') return null;
+  const str = String(value);
+  return (
+    <div className="flex gap-2 text-[11px] py-0.5">
+      <span className="text-slate-600 dark:text-slate-300 font-medium shrink-0 w-20">{label}</span>
+      {url ? (
+        <a href={str} target="_blank" rel="noreferrer"
+          className="text-blue-600 dark:text-blue-400 underline hover:text-blue-700 dark:hover:text-blue-300">
+          Open ↗
+        </a>
+      ) : (
+        <span className={`text-slate-800 dark:text-slate-100 break-all leading-snug ${mono ? 'font-mono text-[10px]' : ''}`}>
+          {str}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Recursively renders any value without raw JSON.stringify */
+function SmartValue({ v, depth = 0 }: { v: unknown; depth?: number }) {
+  if (v === null || v === undefined) {
+    return <span className="text-slate-400 dark:text-slate-500 italic">—</span>;
+  }
+  if (typeof v === 'boolean') {
     return (
-      <div className="p-3 space-y-1">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Output</span>
-          <CopyButton text={out} />
+      <span className={`font-semibold ${v ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+        {v ? 'Yes' : 'No'}
+      </span>
+    );
+  }
+  if (typeof v === 'number') {
+    return <span className="tabular-nums text-slate-800 dark:text-slate-100">{v.toLocaleString()}</span>;
+  }
+  if (typeof v === 'string') {
+    if (v.startsWith('http://') || v.startsWith('https://')) {
+      return (
+        <a href={v} target="_blank" rel="noreferrer"
+          className="text-blue-600 dark:text-blue-400 underline hover:text-blue-700 dark:hover:text-blue-300 break-all">
+          {v}
+        </a>
+      );
+    }
+    return <span className="text-slate-800 dark:text-slate-100 break-all">{v}</span>;
+  }
+  if (Array.isArray(v)) {
+    if (v.length === 0) return <span className="text-slate-500 dark:text-slate-400 italic">empty list</span>;
+    if (depth > 0) return <span className="text-slate-600 dark:text-slate-300">[{v.length} item{v.length !== 1 ? 's' : ''}]</span>;
+    return (
+      <div className="space-y-1 mt-0.5">
+        {v.slice(0, 3).map((item, i) => (
+          <div key={i} className="bg-slate-200 dark:bg-slate-700 rounded px-2 py-1 text-[10px]">
+            <SmartValue v={item} depth={depth + 1} />
+          </div>
+        ))}
+        {v.length > 3 && <span className="text-[10px] text-slate-500 dark:text-slate-400">+{v.length - 3} more items</span>}
+      </div>
+    );
+  }
+  if (typeof v === 'object') {
+    if (depth >= 2) {
+      return <span className="text-slate-600 dark:text-slate-300 font-mono text-[10px]">{JSON.stringify(v)}</span>;
+    }
+    return (
+      <div className="space-y-0.5 mt-0.5 pl-2 border-l-2 border-slate-300 dark:border-slate-500">
+        {Object.entries(v as Record<string, unknown>).map(([k, val]) => (
+          <div key={k} className="flex gap-2 text-[10px]">
+            <span className="text-slate-600 dark:text-slate-300 font-medium shrink-0 min-w-[70px]">{k}</span>
+            <SmartValue v={val} depth={depth + 1} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return <span className="text-slate-800 dark:text-slate-100">{String(v)}</span>;
+}
+
+/** Shows first N items with a "Show all / Show less" toggle */
+function ExpandableList<T>({
+  items,
+  renderItem,
+  initialShow = 5,
+  emptyText = 'No items found',
+  countLabel,
+}: {
+  items: T[];
+  renderItem: (item: T, index: number) => ReactNode;
+  initialShow?: number;
+  emptyText?: string;
+  countLabel: (n: number) => string;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? items : items.slice(0, initialShow);
+
+  if (items.length === 0) {
+    return <p className="text-xs text-slate-500 dark:text-slate-400 italic py-2">{emptyText}</p>;
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <SectionLabel>{countLabel(items.length)}</SectionLabel>
+        {items.length > initialShow && (
+          <button
+            type="button"
+            onClick={() => setShowAll((p) => !p)}
+            className="text-[10px] text-blue-500 dark:text-blue-400 hover:underline"
+          >
+            {showAll ? 'Show less' : `Show all ${items.length}`}
+          </button>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        {visible.map((item, i) => <div key={i}>{renderItem(item, i)}</div>)}
+      </div>
+    </div>
+  );
+}
+
+// ── Gmail helpers ─────────────────────────────────────────────────────────────
+
+type GmailEmailItem = {
+  id?: string; threadId?: string; subject?: string;
+  from?: string; to?: string; date?: string; snippet?: string; body?: string;
+};
+
+/** Extracts a readable display name from "Full Name <email@domain>" or a plain address */
+function senderName(from: string | undefined): string {
+  if (!from) return '—';
+  const m = from.match(/^([^<]+)<[^>]+>/);
+  return m ? m[1].trim() : from.split('@')[0];
+}
+
+/** Single email card — used in flat list and inside thread expansion */
+function GmailEmailCard({ email, indent = false }: { email: GmailEmailItem; indent?: boolean }) {
+  const [showBody, setShowBody] = useState(false);
+  const hasBody = Boolean(email.body?.trim());
+
+  return (
+    <div className={`space-y-1.5 ${indent ? 'px-4 py-3 bg-white dark:bg-slate-900/50' : 'bg-slate-100 dark:bg-slate-800 rounded-md px-3 py-2.5'}`}>
+      {!indent && (
+        <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 leading-snug break-words">
+          {email.subject || '(no subject)'}
+        </p>
+      )}
+      <div className="flex items-start gap-2 text-[10px] flex-wrap">
+        <span className="font-semibold text-slate-700 dark:text-slate-200 break-all">{email.from || '—'}</span>
+        {email.date && (
+          <span className="shrink-0 text-slate-500 dark:text-slate-400">{fmtDate(email.date)}</span>
+        )}
+      </div>
+
+      {/* Snippet always shown as a quick preview */}
+      {email.snippet && (
+        <p className="text-[10px] text-slate-600 dark:text-slate-300 leading-relaxed break-words italic">
+          {email.snippet}
+        </p>
+      )}
+
+      {/* Full body — collapsed by default, toggled per-card */}
+      {hasBody && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowBody((p) => !p)}
+            className="flex items-center gap-1 text-[10px] text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            {showBody ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            {showBody ? 'Hide body' : 'Show full body'}
+          </button>
+          {showBody && (
+            <pre className="mt-1.5 text-[10px] text-slate-800 dark:text-slate-100 leading-relaxed whitespace-pre-wrap break-words bg-white dark:bg-slate-900/60 rounded p-2 border border-slate-200 dark:border-slate-700 overflow-auto">
+              {email.body}
+            </pre>
+          )}
         </div>
-        <div className="bg-slate-100 dark:bg-slate-800 rounded-md p-2.5">
-          <p className="text-xs text-gray-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">{out}</p>
+      )}
+
+      {email.id && (
+        <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">ID: {email.id}</p>
+      )}
+    </div>
+  );
+}
+
+/** Collapsible thread row — shown when ≥2 emails share the same threadId */
+function GmailThreadAccordion({ messages }: { messages: GmailEmailItem[] }) {
+  const [open, setOpen] = useState(false);
+  const first        = messages[0];
+  const last         = messages[messages.length - 1];
+  const participants = [...new Set(messages.map((m) => senderName(m.from)).filter(Boolean))];
+
+  return (
+    <div className="rounded-lg border border-blue-200 dark:border-blue-700/60 overflow-hidden">
+      {/* Thread summary row — click to expand */}
+      <button
+        type="button"
+        onClick={() => setOpen((p) => !p)}
+        className="w-full flex items-start gap-3 px-3 py-2.5 bg-blue-50 dark:bg-blue-950/30 hover:bg-blue-100/80 dark:hover:bg-blue-900/40 transition-colors text-left"
+      >
+        <div className="flex-1 min-w-0 space-y-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 break-words leading-snug">
+              {first.subject || '(no subject)'}
+            </p>
+            <span className="inline-flex items-center shrink-0 gap-1 bg-blue-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-full leading-none">
+              {messages.length} messages
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-[10px] text-slate-600 dark:text-slate-300 flex-wrap">
+            <span className="break-all">
+              {participants.slice(0, 3).join(', ')}
+              {participants.length > 3 && <span className="text-slate-500 dark:text-slate-400"> +{participants.length - 3} more</span>}
+            </span>
+            {last.date && (
+              <span className="shrink-0 text-slate-500 dark:text-slate-400">Last: {fmtDate(last.date)}</span>
+            )}
+          </div>
+        </div>
+        <div className="shrink-0 mt-0.5 text-blue-500 dark:text-blue-400">
+          {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </div>
+      </button>
+
+      {/* Expanded: individual messages in chronological order */}
+      {open && (
+        <div className="divide-y divide-slate-200 dark:divide-slate-700/50">
+          {messages.map((msg, i) => (
+            <div key={i} className="relative pl-8">
+              {/* Thread line */}
+              {i < messages.length - 1 && (
+                <div className="absolute left-4 top-0 bottom-0 w-px bg-blue-200 dark:bg-blue-800/60" />
+              )}
+              <div className="absolute left-3 top-3 w-2 h-2 rounded-full bg-blue-300 dark:bg-blue-600 border-2 border-white dark:border-slate-900" />
+              <GmailEmailCard email={msg} indent />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Gmail result ──────────────────────────────────────────────────────────────
+
+type GmailThreadItem = { threadId: string; messages: GmailEmailItem[] };
+
+function GmailResultDisplay({ result }: { result: NodeTestResult }) {
+  const out = (result.output ?? {}) as Record<string, unknown>;
+
+  // ── List action (new structure): output has a `threads` array ─────────────
+  if (Array.isArray(out.threads)) {
+    const threads        = out.threads as GmailThreadItem[];
+    const totalMessages  = typeof out.totalMessages  === 'number' ? out.totalMessages  : threads.reduce((s, t) => s + t.messages.length, 0);
+    const matchedMessages = typeof out.matchedMessages === 'number' ? out.matchedMessages : null;
+    const threadedGroups = threads.filter((t) => t.messages.length > 1);
+    const hasThreads     = threadedGroups.length > 0;
+
+    return (
+      <div className="p-3 space-y-2">
+        {/* Summary */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <SectionLabel>
+            {threads.length} thread{threads.length !== 1 ? 's' : ''}
+            {' · '}
+            {totalMessages} message{totalMessages !== 1 ? 's' : ''}
+            {matchedMessages !== null && matchedMessages !== totalMessages && (
+              <span className="text-slate-500 dark:text-slate-400 font-normal">
+                {' '}({matchedMessages} matched filter, {totalMessages - matchedMessages} pulled from threads)
+              </span>
+            )}
+          </SectionLabel>
+          {hasThreads && (
+            <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+              {threadedGroups.length} thread{threadedGroups.length !== 1 ? 's have' : ' has'} multiple messages — click to expand
+            </span>
+          )}
+        </div>
+
+        {/* Threads / single emails */}
+        <div className="space-y-2">
+          {threads.map((thread, i) =>
+            thread.messages.length === 1
+              ? <GmailEmailCard key={i} email={thread.messages[0]} />
+              : <GmailThreadAccordion key={i} messages={thread.messages} />
+          )}
         </div>
       </div>
     );
   }
 
-  if (typeof out === 'object' && out !== null) {
+  // ── List action (legacy structure): output has a flat `messages` array ────
+  if (Array.isArray(out.messages)) {
+    const emails = out.messages as GmailEmailItem[];
+
+    // Group by threadId; emails without threadId get their own pseudo-thread key
+    const threadMap  = new Map<string, GmailEmailItem[]>();
+    const threadOrder: string[] = [];
+    emails.forEach((email) => {
+      const tid = email.threadId ?? `__${email.id}`;
+      if (!threadMap.has(tid)) { threadMap.set(tid, []); threadOrder.push(tid); }
+      threadMap.get(tid)!.push(email);
+    });
+
+    const groups         = threadOrder.map((tid) => threadMap.get(tid)!);
+    const threadedGroups = groups.filter((t) => t.length > 1);
+    const hasThreads     = threadedGroups.length > 0;
+
+    return (
+      <div className="p-3 space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <SectionLabel>
+            {emails.length} email{emails.length !== 1 ? 's' : ''}
+            {hasThreads ? ` in ${groups.length} thread${groups.length !== 1 ? 's' : ''}` : ' found'}
+          </SectionLabel>
+          {hasThreads && (
+            <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+              {threadedGroups.length} thread{threadedGroups.length !== 1 ? 's have' : ' has'} multiple messages — click to expand
+            </span>
+          )}
+        </div>
+        <div className="space-y-2">
+          {groups.map((group, i) =>
+            group.length === 1
+              ? <GmailEmailCard key={i} email={group[0]} />
+              : <GmailThreadAccordion key={i} messages={group} />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Read action — output has both `body` and `subject`
+  if (out.body !== undefined && out.subject !== undefined) {
+    const email = out as GmailEmailItem;
+    return (
+      <div className="p-3 space-y-2.5">
+        <div className="bg-slate-100 dark:bg-slate-800 rounded-md p-3 space-y-2">
+          <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+            {email.subject || '(no subject)'}
+          </p>
+          <div className="space-y-0.5 pb-2 border-b border-slate-200 dark:border-slate-700">
+            <InfoRow label="From" value={email.from} />
+            <InfoRow label="To"   value={email.to} />
+            <InfoRow label="Date" value={fmtDate(email.date)} />
+          </div>
+          {email.body ? (
+            <div>
+              <SectionLabel>Message body</SectionLabel>
+              <p className="mt-1 text-[11px] text-slate-800 dark:text-slate-100 whitespace-pre-wrap leading-relaxed">
+                {email.body}
+              </p>
+            </div>
+          ) : email.snippet ? (
+            <p className="text-[11px] text-slate-600 dark:text-slate-300 italic">{email.snippet}</p>
+          ) : null}
+        </div>
+        {email.id && (
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Message ID: {email.id}</p>
+        )}
+      </div>
+    );
+  }
+
+  // Send action
+  const sent = out as { messageId?: string };
+  return (
+    <div className="p-3">
+      <SuccessBanner
+        text="Email sent successfully"
+        sub={sent.messageId ? `Message ID: ${sent.messageId}` : undefined}
+      />
+    </div>
+  );
+}
+
+// ── Google Drive result ───────────────────────────────────────────────────────
+
+function GDriveResultDisplay({ result }: { result: NodeTestResult }) {
+  const out = (result.output ?? {}) as Record<string, unknown>;
+
+  // List action
+  if (Array.isArray(out.files)) {
+    type DriveFile = {
+      id?: string; name?: string; mimeType?: string;
+      size?: string | number; modifiedTime?: string; webViewLink?: string;
+    };
+    const files = out.files as DriveFile[];
+    return (
+      <div className="p-3 space-y-2">
+        <ExpandableList
+          items={files}
+          countLabel={(n) => `${n} file${n !== 1 ? 's' : ''} found`}
+          initialShow={6}
+          emptyText="No files matched the query"
+          renderItem={(file) => (
+            <div className="bg-slate-100 dark:bg-slate-800 rounded-md px-3 py-2 flex items-center gap-3">
+              <div className="flex-1 min-w-0 space-y-0.5">
+                <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 break-words">
+                  {file.name || 'Untitled'}
+                </p>
+                <div className="flex gap-3 text-[10px] text-slate-600 dark:text-slate-300">
+                  {file.size != null && <span>{fmtBytes(file.size)}</span>}
+                  {file.modifiedTime && <span>Modified {fmtDate(file.modifiedTime)}</span>}
+                </div>
+              </div>
+              {file.webViewLink && (
+                <a href={file.webViewLink} target="_blank" rel="noreferrer"
+                  className="text-[10px] text-blue-500 hover:underline shrink-0">Open ↗</a>
+              )}
+            </div>
+          )}
+        />
+      </div>
+    );
+  }
+
+  // Download action
+  if (out.content !== undefined) {
+    const dl = out as { name?: string; mimeType?: string; content?: string };
+    return (
+      <div className="p-3 space-y-2.5">
+        <SuccessBanner text={`Downloaded: ${dl.name || 'file'}`} sub={dl.mimeType} />
+        {dl.content && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <SectionLabel>Content preview</SectionLabel>
+              <CopyButton text={dl.content} />
+            </div>
+            <pre className="bg-slate-100 dark:bg-slate-800 rounded p-2.5 text-[10px] text-slate-800 dark:text-slate-100 whitespace-pre-wrap leading-relaxed">
+              {dl.content}
+            </pre>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Upload action
+  const up = out as { name?: string; id?: string; webViewLink?: string };
+  return (
+    <div className="p-3 space-y-2">
+      <SuccessBanner text={`Uploaded: ${up.name || 'file'}`} />
+      <InfoRow label="File ID" value={up.id} mono />
+      {up.webViewLink && <InfoRow label="Link" value={up.webViewLink} url />}
+    </div>
+  );
+}
+
+// ── Google Docs result ────────────────────────────────────────────────────────
+
+function GDocsResultDisplay({ result }: { result: NodeTestResult }) {
+  const out = (result.output ?? {}) as Record<string, unknown>;
+  const doc = out as {
+    documentId?: string; title?: string; text?: string;
+    url?: string; appended?: string; endIndex?: number;
+  };
+
+  // Append action
+  if (doc.appended !== undefined) {
+    return (
+      <div className="p-3 space-y-2">
+        <SuccessBanner text="Text appended to document" sub={doc.documentId} />
+        <div className="space-y-1">
+          <SectionLabel>Appended text</SectionLabel>
+          <p className="text-[11px] text-slate-800 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 rounded p-2.5 whitespace-pre-wrap leading-relaxed mt-0.5">
+            {doc.appended}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Read action
+  if (doc.text !== undefined) {
+    return (
+      <div className="p-3 space-y-2.5">
+        <div className="space-y-0.5">
+          <InfoRow label="Title"  value={doc.title} />
+          <InfoRow label="Doc ID" value={doc.documentId} mono />
+        </div>
+        {doc.text ? (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <SectionLabel>Document content</SectionLabel>
+              <CopyButton text={doc.text} />
+            </div>
+            <pre className="bg-slate-100 dark:bg-slate-800 rounded p-2.5 text-[11px] text-slate-800 dark:text-slate-100 whitespace-pre-wrap leading-relaxed">
+              {doc.text}
+            </pre>
+          </div>
+        ) : (
+          <p className="text-xs text-slate-500 dark:text-slate-400 italic">Document is empty</p>
+        )}
+      </div>
+    );
+  }
+
+  // Create action
+  return (
+    <div className="p-3 space-y-2">
+      <SuccessBanner text={`Document created: ${doc.title || 'Untitled'}`} />
+      <InfoRow label="Doc ID" value={doc.documentId} mono />
+      {doc.url && <InfoRow label="Edit link" value={doc.url} url />}
+    </div>
+  );
+}
+
+// ── Google Sheets result ──────────────────────────────────────────────────────
+
+function GSheetsResultDisplay({ result }: { result: NodeTestResult }) {
+  const out = (result.output ?? {}) as Record<string, unknown>;
+  const [showAll, setShowAll] = useState(false);
+  const LIMIT = 8;
+
+  // Read action — has `headers`
+  if (out.headers !== undefined) {
+    const headers   = (out.headers as string[]) ?? [];
+    const data      = (out.data as Record<string, unknown>[]) ?? [];
+    const rawRows   = (out.rows as unknown[][]) ?? [];
+    const bodyRows  = data.length > 0 ? data : rawRows.slice(1);
+    const displayed = showAll ? bodyRows : bodyRows.slice(0, LIMIT);
+
+    return (
+      <div className="p-3 space-y-2.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 tabular-nums">
+            {bodyRows.length} row{bodyRows.length !== 1 ? 's' : ''}
+          </span>
+          <span className="text-slate-400 dark:text-slate-500">·</span>
+          <span className="text-xs text-slate-600 dark:text-slate-300">
+            {headers.length} column{headers.length !== 1 ? 's' : ''}
+          </span>
+          {out.range && (
+            <>
+              <span className="text-slate-400 dark:text-slate-500">·</span>
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{String(out.range)}</span>
+            </>
+          )}
+        </div>
+
+        {headers.length > 0 && (
+          <div className="overflow-auto rounded border border-slate-200 dark:border-slate-700">
+            <table className="w-full text-[10px] border-collapse">
+              <thead>
+                <tr className="bg-slate-200 dark:bg-slate-700">
+                  {headers.map((h, i) => (
+                    <th key={i} className="text-left px-2.5 py-1.5 text-slate-700 dark:text-slate-200 font-semibold whitespace-nowrap border-r border-slate-300 dark:border-slate-600 last:border-r-0">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {displayed.map((row, ri) => {
+                  const cells: unknown[] = data.length > 0
+                    ? headers.map((h) => (row as Record<string, unknown>)[h])
+                    : (row as unknown[]);
+                  return (
+                    <tr key={ri} className="border-t border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      {cells.map((cell, ci) => (
+                        <td key={ci} className="px-2.5 py-1.5 text-slate-800 dark:text-slate-100 border-r border-slate-200 dark:border-slate-700 last:border-r-0 whitespace-nowrap">
+                          {cell == null
+                            ? <span className="text-slate-400 dark:text-slate-500">—</span>
+                            : String(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {bodyRows.length > LIMIT && (
+              <div className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setShowAll((p) => !p)}
+                  className="text-[10px] text-blue-500 dark:text-blue-400 hover:underline"
+                >
+                  {showAll ? 'Show fewer rows' : `Show all ${bodyRows.length} rows`}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Write / append action
+  const w = out as {
+    updatedRows?: number; updatedColumns?: number; updatedCells?: number;
+    updatedRange?: string; tableRange?: string;
+  };
+  const stats = [
+    { label: 'Rows',    value: w.updatedRows },
+    { label: 'Columns', value: w.updatedColumns },
+    { label: 'Cells',   value: w.updatedCells },
+  ].filter((s) => s.value != null);
+
+  return (
+    <div className="p-3 space-y-2">
+      <SuccessBanner text="Spreadsheet updated" />
+      {stats.length > 0 && (
+        <div className={`grid gap-2 text-center`} style={{ gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))` }}>
+          {stats.map(({ label, value }) => (
+            <div key={label} className="bg-slate-100 dark:bg-slate-800 rounded p-2">
+              <p className="text-sm font-bold text-slate-700 dark:text-slate-200 tabular-nums">{value}</p>
+              <p className="text-[10px] text-slate-600 dark:text-slate-300">{label} updated</p>
+            </div>
+          ))}
+        </div>
+      )}
+      {(w.updatedRange ?? w.tableRange) && (
+        <InfoRow label="Range" value={w.updatedRange ?? w.tableRange} mono />
+      )}
+    </div>
+  );
+}
+
+// ── Slack result ──────────────────────────────────────────────────────────────
+
+function SlackResultDisplay({ result }: { result: NodeTestResult }) {
+  const out = (result.output ?? {}) as Record<string, unknown>;
+
+  // Read messages action
+  if (Array.isArray(out.messages)) {
+    type SlackMsg = { ts?: string; text?: string; user?: string; replyCount?: number; threadTs?: string };
+    const msgs      = out.messages as SlackMsg[];
+    const hasThread = msgs.some((m) => (m.replyCount ?? 0) > 0);
+
+    return (
+      <div className="p-3 space-y-2">
+        {/* Hint when threads are present */}
+        {hasThread && (
+          <div className="flex items-center gap-2 rounded-md bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/50 px-3 py-2">
+            <Info className="w-3 h-3 text-indigo-500 dark:text-indigo-400 shrink-0" />
+            <p className="text-[10px] text-indigo-700 dark:text-indigo-300 font-medium">
+              Some messages have thread replies — shown as a badge. Replies live in separate threads and are not fetched here.
+            </p>
+          </div>
+        )}
+        <ExpandableList
+          items={msgs}
+          countLabel={(n) => `${n} message${n !== 1 ? 's' : ''} retrieved`}
+          initialShow={5}
+          emptyText="No messages found"
+          renderItem={(m) => (
+            <div className="bg-slate-100 dark:bg-slate-800 rounded-md px-3 py-2.5 space-y-1">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  {m.user && (
+                    <p className="text-[10px] font-semibold text-slate-600 dark:text-slate-300 mb-0.5">@{m.user}</p>
+                  )}
+                  <p className="text-xs text-slate-800 dark:text-slate-100 leading-snug break-words">{m.text || '(no text)'}</p>
+                </div>
+                {(m.replyCount ?? 0) > 0 && (
+                  <span className="inline-flex items-center shrink-0 gap-1 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-[9px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap border border-indigo-200 dark:border-indigo-700/50">
+                    🧵 {m.replyCount} {m.replyCount === 1 ? 'reply' : 'replies'}
+                  </span>
+                )}
+              </div>
+              {m.ts && (
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{m.ts}</p>
+              )}
+            </div>
+          )}
+        />
+      </div>
+    );
+  }
+
+  // File upload action
+  if (out.fileId !== undefined) {
+    return (
+      <div className="p-3 space-y-2">
+        <SuccessBanner text={`File uploaded: ${out.filename ?? 'file'}`} />
+        <InfoRow label="File ID" value={String(out.fileId ?? '')} mono />
+      </div>
+    );
+  }
+
+  // Send message / DM
+  return (
+    <div className="p-3 space-y-2">
+      <SuccessBanner text="Message sent to Slack" />
+      <div className="space-y-0.5">
+        {out.channel && <InfoRow label="Channel"   value={String(out.channel)} />}
+        {out.ts      && <InfoRow label="Timestamp" value={String(out.ts)} mono />}
+      </div>
+    </div>
+  );
+}
+
+// ── Teams helpers ─────────────────────────────────────────────────────────────
+
+type TeamsMsgItem = { id?: string; text?: string; from?: string; createdAt?: string; replyToId?: string };
+
+/** A single Teams message card */
+function TeamsMessageCard({ msg, indent = false }: { msg: TeamsMsgItem; indent?: boolean }) {
+  return (
+    <div className={`space-y-0.5 ${indent ? 'px-4 py-2.5 bg-white dark:bg-slate-900/50' : 'bg-slate-100 dark:bg-slate-800 rounded-md px-3 py-2.5'}`}>
+      {msg.from && (
+        <p className="text-[10px] font-semibold text-slate-600 dark:text-slate-300">{msg.from}</p>
+      )}
+      <p className="text-xs text-slate-800 dark:text-slate-100 leading-snug break-words">{msg.text || '(no text)'}</p>
+      {msg.createdAt && (
+        <p className="text-[10px] text-slate-500 dark:text-slate-400">{fmtDate(msg.createdAt)}</p>
+      )}
+    </div>
+  );
+}
+
+/** Collapsible thread for a Teams parent message + its replies */
+function TeamsThreadAccordion({ message, replies }: { message: TeamsMsgItem; replies: TeamsMsgItem[] }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="rounded-lg border border-violet-200 dark:border-violet-800/50 overflow-hidden">
+      {/* Parent message row */}
+      <div className="bg-violet-50 dark:bg-violet-950/20 px-3 py-2.5 space-y-0.5">
+        {message.from && (
+          <p className="text-[10px] font-semibold text-slate-700 dark:text-slate-200">{message.from}</p>
+        )}
+        <p className="text-xs text-slate-800 dark:text-slate-100 leading-snug break-words">
+          {message.text || '(no text)'}
+        </p>
+        {message.createdAt && (
+          <p className="text-[10px] text-slate-500 dark:text-slate-400">{fmtDate(message.createdAt)}</p>
+        )}
+      </div>
+
+      {/* Reply toggle */}
+      <button
+        type="button"
+        onClick={() => setOpen((p) => !p)}
+        className="w-full flex items-center gap-2 px-3 py-1.5 bg-violet-100/60 dark:bg-violet-900/20 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors text-left border-t border-violet-200 dark:border-violet-800/40"
+      >
+        {open ? <ChevronUp className="w-3 h-3 text-violet-500 dark:text-violet-400" /> : <ChevronDown className="w-3 h-3 text-violet-500 dark:text-violet-400" />}
+        <span className="text-[10px] font-semibold text-violet-700 dark:text-violet-300">
+          {replies.length} {replies.length === 1 ? 'reply' : 'replies'} in thread
+        </span>
+      </button>
+
+      {/* Replies */}
+      {open && (
+        <div className="divide-y divide-slate-200 dark:divide-slate-700/50">
+          {replies.map((r, i) => (
+            <div key={i} className="relative pl-8">
+              {i < replies.length - 1 && (
+                <div className="absolute left-4 top-0 bottom-0 w-px bg-violet-200 dark:bg-violet-800/40" />
+              )}
+              <div className="absolute left-3 top-3 w-2 h-2 rounded-full bg-violet-300 dark:bg-violet-600 border-2 border-white dark:border-slate-900" />
+              <TeamsMessageCard msg={r} indent />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Teams result ──────────────────────────────────────────────────────────────
+
+function TeamsResultDisplay({ result }: { result: NodeTestResult }) {
+  const out = (result.output ?? {}) as Record<string, unknown>;
+
+  // Read messages action
+  if (Array.isArray(out.messages)) {
+    const msgs     = out.messages as TeamsMsgItem[];
+    const topLevel = msgs.filter((m) => !m.replyToId);
+    const replies  = msgs.filter((m) => !!m.replyToId);
+
+    // Build a map from parent ID → replies
+    const replyMap = new Map<string, TeamsMsgItem[]>();
+    replies.forEach((r) => {
+      const pid = r.replyToId!;
+      if (!replyMap.has(pid)) replyMap.set(pid, []);
+      replyMap.get(pid)!.push(r);
+    });
+
+    const hasThreads = replies.length > 0;
+
+    return (
+      <div className="p-3 space-y-2">
+        <SectionLabel>
+          {msgs.length} message{msgs.length !== 1 ? 's' : ''}
+          {hasThreads && ` (${replies.length} ${replies.length === 1 ? 'reply' : 'replies'} in threads)`}
+        </SectionLabel>
+
+        <div className="space-y-2">
+          {topLevel.map((msg, i) => {
+            const msgReplies = replyMap.get(String(msg.id)) ?? [];
+            return msgReplies.length > 0
+              ? <TeamsThreadAccordion key={i} message={msg} replies={msgReplies} />
+              : <TeamsMessageCard     key={i} msg={msg} />;
+          })}
+
+          {/* Orphaned replies — parent not in this result set */}
+          {replies
+            .filter((r) => !topLevel.find((t) => String(t.id) === r.replyToId))
+            .map((r, i) => (
+              <div key={`orphan-${i}`} className="relative pl-7">
+                <div className="absolute left-3 top-3 w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600 border-2 border-white dark:border-slate-900" />
+                <div className="absolute left-4 top-0 h-full w-px bg-slate-200 dark:bg-slate-700" />
+                <TeamsMessageCard msg={r} />
+              </div>
+            ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Send message / DM
+  const msg = out as { id?: string; teamId?: string; channelId?: string; chatId?: string; createdAt?: string };
+  return (
+    <div className="p-3 space-y-2">
+      <SuccessBanner
+        text="Message sent to Teams"
+        sub={msg.createdAt ? `Sent at ${fmtDate(msg.createdAt)}` : undefined}
+      />
+      <div className="space-y-0.5">
+        {msg.teamId    && <InfoRow label="Team ID"    value={msg.teamId} mono />}
+        {msg.channelId && <InfoRow label="Channel ID" value={msg.channelId} mono />}
+        {msg.chatId    && <InfoRow label="Chat ID"    value={msg.chatId} mono />}
+        {msg.id        && <InfoRow label="Message ID" value={msg.id} mono />}
+      </div>
+    </div>
+  );
+}
+
+// ── Basecamp result ───────────────────────────────────────────────────────────
+
+function BasecampResultDisplay({ result }: { result: NodeTestResult }) {
+  const out = (result.output ?? {}) as Record<string, unknown>;
+
+  // List todos action
+  if (Array.isArray(out.todos)) {
+    type Todo = { id?: unknown; title?: string; completed?: boolean; dueOn?: string; _groupName?: string };
+    const todos = out.todos as Todo[];
+    const done  = todos.filter((t) => t.completed).length;
+    return (
+      <div className="p-3 space-y-2">
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="font-semibold text-slate-700 dark:text-slate-200">{todos.length} to-do{todos.length !== 1 ? 's' : ''}</span>
+          {done > 0 && (
+            <>
+              <span className="text-slate-400 dark:text-slate-500">·</span>
+              <span className="text-emerald-600 dark:text-emerald-400">{done} completed</span>
+            </>
+          )}
+        </div>
+        <ExpandableList
+          items={todos}
+          countLabel={() => ''}
+          initialShow={8}
+          emptyText="No to-dos found"
+          renderItem={(todo) => (
+            <div className="flex items-start gap-2.5 bg-slate-100 dark:bg-slate-800 rounded-md px-3 py-2">
+              <span className={`mt-0.5 shrink-0 w-3 h-3 rounded-full border-2 flex-shrink-0 ${
+                todo.completed
+                  ? 'bg-emerald-400 border-emerald-400'
+                  : 'border-slate-400 dark:border-slate-500'
+              }`} />
+              <div className="flex-1 min-w-0">
+                <p className={`text-xs leading-snug ${
+                  todo.completed
+                    ? 'line-through text-slate-400 dark:text-slate-500'
+                    : 'text-slate-800 dark:text-slate-100'
+                }`}>
+                  {todo.title || '(untitled)'}
+                </p>
+                <div className="flex gap-2 mt-0.5 text-[10px] text-slate-600 dark:text-slate-300">
+                  {todo._groupName && <span>{todo._groupName}</span>}
+                  {todo.dueOn      && <span>Due {todo.dueOn}</span>}
+                </div>
+              </div>
+            </div>
+          )}
+        />
+      </div>
+    );
+  }
+
+  // Single-action results (create, complete, post message, comment, campfire)
+  const single = out as {
+    id?: unknown; title?: string; subject?: string;
+    status?: string; completed?: boolean; todoId?: string;
+  };
+
+  const statusLabels: Record<string, string> = {
+    created:   'To-do created',
+    posted:    'Message posted to Basecamp',
+    commented: 'Comment added',
+    sent:      'Campfire message sent',
+  };
+
+  const bannerText = single.status
+    ? (statusLabels[single.status] ?? `Done — ${single.status}`)
+    : single.completed === true
+      ? 'To-do marked as complete ✓'
+      : single.completed === false
+        ? 'To-do marked as incomplete'
+        : 'Action completed';
+
+  return (
+    <div className="p-3 space-y-2">
+      <SuccessBanner text={bannerText} />
+      <div className="space-y-0.5">
+        {single.title   && <InfoRow label="Title"     value={single.title} />}
+        {single.subject && <InfoRow label="Subject"   value={single.subject} />}
+        {single.id != null && <InfoRow label="ID"     value={String(single.id)} mono />}
+        {single.todoId  && <InfoRow label="To-do ID"  value={single.todoId} mono />}
+      </div>
+    </div>
+  );
+}
+
+// ── Transform result ──────────────────────────────────────────────────────────
+
+function TransformResultDisplay({ result }: { result: NodeTestResult }) {
+  const out = result.output;
+  if (typeof out !== 'object' || out === null || Array.isArray(out)) {
+    return <GenericResultDisplay result={result} />;
+  }
+  const entries = Object.entries(out as Record<string, unknown>);
+  return (
+    <div className="p-3 space-y-2">
+      <SectionLabel>{entries.length} field{entries.length !== 1 ? 's' : ''} mapped</SectionLabel>
+      <div className="rounded border border-slate-200 dark:border-slate-700 overflow-hidden">
+        {entries.map(([k, v], i) => (
+          <div key={k} className={`flex items-start gap-3 px-3 py-2 text-[11px] border-b border-slate-100 dark:border-slate-700/50 last:border-b-0 ${
+            i % 2 === 0 ? 'bg-white dark:bg-slate-900/40' : 'bg-slate-50 dark:bg-slate-800/40'
+          }`}>
+            <span className="font-semibold text-blue-500 dark:text-blue-400 shrink-0 min-w-[80px] pt-0.5">{k}</span>
+            <span className="text-slate-400 dark:text-slate-500 shrink-0 pt-0.5">→</span>
+            <SmartValue v={v} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Trigger result ────────────────────────────────────────────────────────────
+
+function TriggerResultDisplay({ result }: { result: NodeTestResult }) {
+  const out = (result.output ?? {}) as Record<string, unknown>;
+  const { triggerType, triggeredAt, ...rest } = out;
+
+  const triggerLabels: Record<string, string> = {
+    manual:    'Triggered manually',
+    webhook:   'Webhook received',
+    cron:      'Scheduled run (cron)',
+    app_event: 'App event detected',
+    email:     'Email trigger fired',
+  };
+
+  return (
+    <div className="p-3 space-y-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[11px] font-semibold">
+          {triggerLabels[String(triggerType ?? '')] ?? String(triggerType ?? 'Unknown trigger')}
+        </span>
+        {triggeredAt && (
+          <span className="text-[10px] text-slate-600 dark:text-slate-300">
+            {fmtDate(String(triggeredAt))}
+          </span>
+        )}
+      </div>
+
+      {Object.keys(rest).length > 0 && (
+        <div className="space-y-1">
+          <SectionLabel>Trigger payload</SectionLabel>
+          <div className="rounded border border-slate-200 dark:border-slate-700 overflow-hidden">
+            {Object.entries(rest).map(([k, v], i) => (
+              <div key={k} className={`flex items-start gap-2 px-3 py-1.5 text-[11px] border-b border-slate-100 dark:border-slate-700/50 last:border-b-0 ${
+                i % 2 === 0 ? 'bg-white dark:bg-slate-900/40' : 'bg-slate-50 dark:bg-slate-800/40'
+              }`}>
+                <span className="text-slate-600 dark:text-slate-300 font-medium shrink-0 min-w-[80px] pt-0.5">{k}</span>
+                <SmartValue v={v} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Generic result (output / fallback) ───────────────────────────────────────
+
+function GenericResultDisplay({ result }: { result: NodeTestResult }) {
+  const out = result.output;
+  const outStr = JSON.stringify(out, null, 2);
+
+  if (out == null) {
+    return (
+      <div className="p-3">
+        <p className="text-xs text-slate-500 dark:text-slate-400 italic">No output returned</p>
+      </div>
+    );
+  }
+
+  if (typeof out === 'string') {
+    return (
+      <div className="p-3 space-y-1">
+        <div className="flex items-center justify-between">
+          <SectionLabel>Output</SectionLabel>
+          <CopyButton text={out} />
+        </div>
+        <div className="bg-slate-100 dark:bg-slate-800 rounded-md p-2.5">
+          <p className="text-xs text-slate-800 dark:text-slate-100 whitespace-pre-wrap leading-relaxed">{out}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (Array.isArray(out)) {
+    return (
+      <div className="p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <SectionLabel>{out.length} item{out.length !== 1 ? 's' : ''}</SectionLabel>
+          <CopyButton text={outStr} />
+        </div>
+        <div className="space-y-1.5">
+          {out.slice(0, 10).map((item, i) => (
+            <div key={i} className="bg-slate-100 dark:bg-slate-800 rounded px-2.5 py-1.5 text-[11px]">
+              <SmartValue v={item} />
+            </div>
+          ))}
+          {out.length > 10 && (
+            <p className="text-[10px] text-slate-500 dark:text-slate-400">+{out.length - 10} more items</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (typeof out === 'object') {
     const entries = Object.entries(out as Record<string, unknown>);
     return (
       <div className="p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-            Output — {entries.length} field{entries.length !== 1 ? 's' : ''}
-          </span>
+          <SectionLabel>{entries.length} field{entries.length !== 1 ? 's' : ''}</SectionLabel>
           <CopyButton text={outStr} />
         </div>
-        <div className="space-y-1">
-          {entries.map(([k, v]) => (
-            <div key={k} className="flex items-start gap-2 bg-slate-100 dark:bg-slate-800 rounded px-2.5 py-1.5">
-              <span className="text-[10px] font-mono text-blue-400 shrink-0 pt-0.5 min-w-[60px]">{k}</span>
-              <span className="text-[10px] text-slate-700 dark:text-slate-300 break-all min-w-0 flex-1">
-                {v == null
-                  ? <span className="text-slate-600 italic">empty</span>
-                  : typeof v === 'boolean'
-                    ? <span className={v ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold'}>
-                        {v ? 'true' : 'false'}
-                      </span>
-                    : typeof v === 'object'
-                      ? <span className="text-slate-500 dark:text-slate-400 font-mono">{JSON.stringify(v)}</span>
-                      : <span>{String(v)}</span>
-                }
-              </span>
+        <div className="rounded border border-slate-200 dark:border-slate-700 overflow-hidden">
+          {entries.map(([k, v], i) => (
+            <div key={k} className={`flex items-start gap-2 px-3 py-1.5 text-[11px] border-b border-slate-100 dark:border-slate-700/50 last:border-b-0 ${
+              i % 2 === 0 ? 'bg-white dark:bg-slate-900/40' : 'bg-slate-50 dark:bg-slate-800/40'
+            }`}>
+              <span className="font-mono text-blue-600 dark:text-blue-400 font-semibold shrink-0 min-w-[70px] pt-0.5">{k}</span>
+              <SmartValue v={v} />
             </div>
           ))}
         </div>
@@ -781,51 +1836,105 @@ function GenericResultDisplay({ result }: { result: NodeTestResult }) {
     );
   }
 
-  // Primitive or null
+  // Primitive
   return (
-    <div className="p-3 space-y-1">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Output</span>
-        {out != null && <CopyButton text={String(out)} />}
-      </div>
-      <p className="text-xs text-gray-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded px-2.5 py-2">
-        {out == null
-          ? <span className="italic text-slate-600">No output</span>
-          : String(out)}
-      </p>
+    <div className="p-3">
+      <SmartValue v={out} />
     </div>
   );
 }
 
 // ── Main result wrapper — routes to the right display per node type ────────────
 
+const TYPED_NODES = new Set(['http','llm','condition','switch','gmail','gdrive','gdocs','gsheets','slack','teams','basecamp','transform','trigger']);
+
 function TestResultDisplay({ result, nodeType }: { result: NodeTestResult; nodeType: string }) {
+  const [showRaw, setShowRaw] = useState(false);
+  const rawJson = JSON.stringify(result.output ?? result.error ?? null, null, 2);
+
   return (
     <div className={`rounded-md border overflow-hidden ${
       result.status === 'success' ? 'border-emerald-800/50' : 'border-red-800/50'
     }`}>
       <ResultHeader result={result} />
 
-      {/* Error detail */}
-      {result.status === 'failure' && result.error && (
-        <div className="p-3 bg-red-50 dark:bg-red-950/20 space-y-1">
-          <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">What went wrong</p>
-          <p className="text-xs text-red-600 dark:text-red-300 break-words leading-relaxed">{result.error}</p>
+      {/* View toggle tabs — only when there is output or error detail */}
+      {(result.output != null || result.error) && (
+        <div className="flex items-center gap-0 border-b border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800">
+          <button
+            type="button"
+            onClick={() => setShowRaw(false)}
+            className={`px-3 py-1.5 text-[10px] font-semibold transition-colors border-b-2 ${
+              !showRaw
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-900/60'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Formatted
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowRaw(true)}
+            className={`px-3 py-1.5 text-[10px] font-semibold transition-colors border-b-2 flex items-center gap-1 ${
+              showRaw
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-900/60'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            <Braces className="w-2.5 h-2.5" />
+            Raw JSON
+          </button>
         </div>
       )}
 
-      {/* Success output — node-type-aware */}
-      {result.status === 'success' && result.output != null && (
-        <div className="bg-slate-50 dark:bg-slate-900/80">
-          {nodeType === 'http'      && <HttpResultDisplay      result={result} />}
-          {nodeType === 'llm'       && <LLMResultDisplay       result={result} />}
-          {nodeType === 'condition' && <ConditionResultDisplay result={result} />}
-          {nodeType === 'switch'    && <SwitchResultDisplay    result={result} />}
-          {nodeType !== 'http' && nodeType !== 'llm' &&
-           nodeType !== 'condition' && nodeType !== 'switch' && (
-            <GenericResultDisplay result={result} />
-          )}
+      {/* Raw JSON view */}
+      {showRaw && (
+        <div className="bg-slate-50 dark:bg-slate-900/80 p-3 space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
+              Raw JSON output
+            </span>
+            <CopyButton text={rawJson} />
+          </div>
+          <pre className="text-[10px] font-mono text-slate-800 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 rounded-md p-3 overflow-auto leading-relaxed whitespace-pre-wrap break-all">
+            {rawJson}
+          </pre>
         </div>
+      )}
+
+      {/* Formatted views — hidden when raw JSON is active */}
+      {!showRaw && (
+        <>
+          {/* Error detail */}
+          {result.status === 'failure' && result.error && (
+            <div className="p-3 bg-red-50 dark:bg-red-950/20 space-y-1">
+              <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                What went wrong
+              </p>
+              <p className="text-xs text-red-600 dark:text-red-300 break-words leading-relaxed">{result.error}</p>
+            </div>
+          )}
+
+          {/* Success output — node-type-aware */}
+          {result.status === 'success' && result.output != null && (
+            <div className="bg-slate-50 dark:bg-slate-900/80">
+              {nodeType === 'http'      && <HttpResultDisplay      result={result} />}
+              {nodeType === 'llm'       && <LLMResultDisplay       result={result} />}
+              {nodeType === 'condition' && <ConditionResultDisplay result={result} />}
+              {nodeType === 'switch'    && <SwitchResultDisplay    result={result} />}
+              {nodeType === 'gmail'     && <GmailResultDisplay     result={result} />}
+              {nodeType === 'gdrive'    && <GDriveResultDisplay    result={result} />}
+              {nodeType === 'gdocs'     && <GDocsResultDisplay     result={result} />}
+              {nodeType === 'gsheets'   && <GSheetsResultDisplay   result={result} />}
+              {nodeType === 'slack'     && <SlackResultDisplay     result={result} />}
+              {nodeType === 'teams'     && <TeamsResultDisplay     result={result} />}
+              {nodeType === 'basecamp'  && <BasecampResultDisplay  result={result} />}
+              {nodeType === 'transform' && <TransformResultDisplay result={result} />}
+              {nodeType === 'trigger'   && <TriggerResultDisplay   result={result} />}
+              {!TYPED_NODES.has(nodeType) && <GenericResultDisplay result={result} />}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -1968,10 +3077,159 @@ function CredentialSelect({
   );
 }
 
+// ── EmailTagInput ─────────────────────────────────────────────────────────────
+
+function EmailTagInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  optional = false,
+  nodes = [],
+  testResults = {},
+}: {
+  label: string;
+  value: string[];
+  onChange: (v: string[]) => void;
+  placeholder?: string;
+  optional?: boolean;
+  nodes?: CanvasNode[];
+  testResults?: Record<string, NodeTestResult>;
+}) {
+  const [input, setInput] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function commit(raw: string) {
+    const trimmed = raw.trim().replace(/,\s*$/, '');
+    if (trimmed && !value.includes(trimmed)) {
+      onChange([...value, trimmed]);
+    }
+    setInput('');
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter' || e.key === ',' || e.key === 'Tab') {
+      e.preventDefault();
+      commit(input);
+    } else if (e.key === 'Backspace' && input === '' && value.length > 0) {
+      onChange(value.slice(0, -1));
+    }
+  }
+
+  function handleInsert(expr: string) {
+    setInput((prev) => prev + expr);
+    setPickerOpen(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-1">
+        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+          {label}
+          {optional && <span className="ml-1 text-slate-400 dark:text-slate-500 font-normal">(optional)</span>}
+        </label>
+        {nodes.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setPickerOpen((p) => !p)}
+            title="Insert a variable from another node"
+            className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded transition-colors shrink-0 ${
+              pickerOpen ? 'bg-blue-600 text-white' : 'text-blue-500 dark:text-blue-400 hover:text-gray-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700'
+            }`}
+          >
+            <Braces className="w-2.5 h-2.5" />
+            Insert variable
+          </button>
+        )}
+      </div>
+      <div
+        className="flex flex-wrap gap-1 min-h-[30px] bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md px-2 py-1.5 focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500 cursor-text"
+        onClick={() => inputRef.current?.focus()}
+      >
+        {value.map((email, i) => (
+          <span
+            key={i}
+            className="inline-flex items-center gap-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[10px] rounded px-1.5 py-0.5 max-w-full"
+          >
+            <span className="break-all">{email}</span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onChange(value.filter((_, idx) => idx !== i)); }}
+              className="ml-0.5 text-blue-400 hover:text-red-500 dark:text-blue-500 dark:hover:text-red-400 leading-none flex-shrink-0"
+              aria-label={`Remove ${email}`}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={() => { if (input.trim()) commit(input); }}
+          placeholder={value.length === 0 ? (placeholder ?? 'name@example.com') : ''}
+          className="flex-1 min-w-[140px] bg-transparent text-xs text-gray-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 outline-none py-0.5"
+        />
+      </div>
+      <p className="text-[10px] text-slate-400 dark:text-slate-500">Press Enter, Tab, or comma to add each entry</p>
+      {pickerOpen && (
+        <VariablePickerPanel nodes={nodes} testResults={testResults} onInsert={handleInsert} />
+      )}
+    </div>
+  );
+}
+
 // ── GmailConfig ────────────────────────────────────────────────────────────────
 
 function GmailConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
   const action = (cfg.action as string) ?? 'send';
+
+  // Normalise to/cc/bcc: stored as string[] in config; handle legacy string values.
+  function toArr(v: unknown): string[] {
+    if (Array.isArray(v)) return v as string[];
+    if (typeof v === 'string' && v.trim()) return v.split(',').map((s) => s.trim()).filter(Boolean);
+    return [];
+  }
+
+  const toList  = toArr(cfg.to);
+  const ccList  = toArr(cfg.cc);
+  const bccList = toArr(cfg.bcc);
+
+  // Attachment type checkboxes for List Emails
+  const attachmentTypes = (cfg.attachmentTypes as string[] | undefined) ?? [];
+  function toggleAttachType(type: string) {
+    const next = attachmentTypes.includes(type)
+      ? attachmentTypes.filter((t) => t !== type)
+      : [...attachmentTypes, type];
+    onChange({ attachmentTypes: next });
+  }
+
+  // Auto-format the email body: normalise spacing and wrap in a simple template
+  function autoFormatBody() {
+    const current = String(cfg.body ?? '').trim();
+    if (!current) {
+      onChange({ body: 'Hi,\n\n\n\nBest regards,' });
+      return;
+    }
+    // Collapse 3+ consecutive blank lines → 2, trim each line
+    const normalised = current
+      .split(/\r?\n/)
+      .map((l) => l.trimEnd())
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    // Wrap in greeting / sign-off if neither is present
+    const hasGreeting  = /^(hi|hello|dear|hey|good\s)/i.test(normalised);
+    const hasSignOff   = /(regards|sincerely|thanks|cheers|best),?\s*$/i.test(normalised);
+    const withGreeting = hasGreeting ? normalised : `Hi,\n\n${normalised}`;
+    const formatted    = hasSignOff  ? withGreeting : `${withGreeting}\n\nBest regards,`;
+    onChange({ body: formatted });
+  }
+
   return (
     <div className="space-y-3">
       <CredentialSelect
@@ -1989,18 +3247,68 @@ function GmailConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
         ]}
       />
 
+      {/* ── Send Email ─────────────────────────────────────────── */}
       {action === 'send' && (
         <>
-          <ExpressionInput label="To" value={String(cfg.to ?? '')} onChange={(v) => onChange({ to: v })}
-            placeholder="recipient@example.com" nodes={otherNodes} testResults={testResults} />
-          <ExpressionInput label="CC (optional)" value={String(cfg.cc ?? '')} onChange={(v) => onChange({ cc: v })}
-            placeholder="cc@example.com" nodes={otherNodes} testResults={testResults} />
-          <ExpressionInput label="BCC (optional)" value={String(cfg.bcc ?? '')} onChange={(v) => onChange({ bcc: v })}
-            placeholder="bcc@example.com" nodes={otherNodes} testResults={testResults} />
-          <ExpressionInput label="Subject" value={String(cfg.subject ?? '')} onChange={(v) => onChange({ subject: v })}
-            placeholder="Email subject" nodes={otherNodes} testResults={testResults} />
-          <ExpressionTextArea label="Body" value={String(cfg.body ?? '')} onChange={(v) => onChange({ body: v })}
-            placeholder="Email body…" nodes={otherNodes} testResults={testResults} rows={4} />
+          <EmailTagInput
+            label="To"
+            value={toList}
+            onChange={(v) => onChange({ to: v })}
+            placeholder="recipient@example.com"
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+          <EmailTagInput
+            label="CC"
+            value={ccList}
+            onChange={(v) => onChange({ cc: v })}
+            placeholder="cc@example.com"
+            optional
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+          <EmailTagInput
+            label="BCC"
+            value={bccList}
+            onChange={(v) => onChange({ bcc: v })}
+            placeholder="bcc@example.com"
+            optional
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+          <ExpressionInput
+            label="Subject"
+            value={String(cfg.subject ?? '')}
+            onChange={(v) => onChange({ subject: v })}
+            placeholder="Email subject"
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+          {/* Body with auto-format + resizable textarea */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-1">
+              <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Body</label>
+              <button
+                type="button"
+                onClick={autoFormatBody}
+                title="Auto-format: normalise spacing and wrap in a greeting / sign-off"
+                className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded text-violet-500 dark:text-violet-400 hover:text-gray-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+              >
+                <Wand2 className="w-2.5 h-2.5" />
+                Auto format
+              </button>
+            </div>
+            <ExpressionTextArea
+              label=""
+              value={String(cfg.body ?? '')}
+              onChange={(v) => onChange({ body: v })}
+              placeholder="Email body…"
+              nodes={otherNodes}
+              testResults={testResults}
+              rows={6}
+              resizable
+            />
+          </div>
           <div className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -2014,24 +3322,134 @@ function GmailConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
         </>
       )}
 
+      {/* ── List Emails ────────────────────────────────────────── */}
       {action === 'list' && (
         <>
-          <ExpressionInput label="Search query (Gmail format)" value={String(cfg.query ?? '')}
-            onChange={(v) => onChange({ query: v })} placeholder="from:example.com is:unread"
-            nodes={otherNodes} testResults={testResults} />
+          {/* Read/Unread filter */}
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Read status</label>
+            <div className="flex gap-3">
+              {(['all', 'unread', 'read'] as const).map((opt) => (
+                <label key={opt} className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="gmail-read-status"
+                    value={opt}
+                    checked={(cfg.readStatus as string | undefined ?? 'all') === opt}
+                    onChange={() => onChange({ readStatus: opt })}
+                    className="w-3 h-3 accent-blue-500"
+                  />
+                  <span className="text-xs text-slate-600 dark:text-slate-300 capitalize">{opt === 'all' ? 'All' : opt === 'unread' ? 'Unread only' : 'Read only'}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <EmailTagInput
+            label="From (sender name or email)"
+            value={(() => {
+              const v = cfg.fromFilter;
+              if (Array.isArray(v)) return v as string[];
+              if (typeof v === 'string' && v.trim()) return v.split(',').map((s) => s.trim()).filter(Boolean);
+              return [];
+            })()}
+            onChange={(v) => onChange({ fromFilter: v })}
+            placeholder="john@example.com or John Smith"
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+          <ExpressionInput
+            label="Subject contains"
+            value={String(cfg.subjectFilter ?? '')}
+            onChange={(v) => onChange({ subjectFilter: v })}
+            placeholder="Invoice for"
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+          <ExpressionInput
+            label="Body contains"
+            value={String(cfg.bodyFilter ?? '')}
+            onChange={(v) => onChange({ bodyFilter: v })}
+            placeholder="Any text inside the email body"
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+
+          {/* Attachment filter */}
+          <div className="space-y-2 rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="gmail-has-attach"
+                checked={Boolean(cfg.hasAttachment)}
+                onChange={(e) => onChange({ hasAttachment: e.target.checked, attachmentTypes: e.target.checked ? attachmentTypes : [] })}
+                className="w-3.5 h-3.5 rounded accent-blue-500"
+              />
+              <label htmlFor="gmail-has-attach" className="text-xs font-medium text-slate-600 dark:text-slate-300">Has attachment</label>
+            </div>
+            {Boolean(cfg.hasAttachment) && (
+              <div className="pl-5 space-y-1.5">
+                <p className="text-[10px] text-slate-400 dark:text-slate-500">Filter by attachment type (optional — leave all unchecked to match any)</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                  {([
+                    { id: 'image',  label: 'Image (jpg, png…)' },
+                    { id: 'pdf',    label: 'PDF' },
+                    { id: 'docs',   label: 'Word / Google Docs' },
+                    { id: 'sheets', label: 'Excel / Google Sheets' },
+                  ] as const).map(({ id, label }) => (
+                    <label key={id} className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={attachmentTypes.includes(id)}
+                        onChange={() => toggleAttachType(id)}
+                        className="w-3 h-3 rounded accent-blue-500"
+                      />
+                      <span className="text-[11px] text-slate-600 dark:text-slate-300">{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="space-y-1">
             <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Max results</label>
-            <input type="number" min={1} max={500} value={String(cfg.maxResults ?? 10)}
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={String(cfg.maxResults ?? 10)}
               onChange={(e) => onChange({ maxResults: Number(e.target.value) })}
-              className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
           </div>
         </>
       )}
 
+      {/* ── Read Email ─────────────────────────────────────────── */}
       {action === 'read' && (
-        <ExpressionInput label="Message ID" value={String(cfg.messageId ?? '')}
-          onChange={(v) => onChange({ messageId: v })} placeholder="Enter or pick from a list result"
-          nodes={otherNodes} testResults={testResults} />
+        <>
+          {/* Info box explaining the purpose of Read Email */}
+          <div className="flex gap-2 rounded-md border border-blue-200 dark:border-blue-800/50 bg-blue-50 dark:bg-blue-900/20 px-3 py-2.5">
+            <Info className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="text-[11px] font-semibold text-blue-700 dark:text-blue-300">What is Read Email?</p>
+              <p className="text-[11px] text-blue-600 dark:text-blue-400 leading-relaxed">
+                <strong>List Emails</strong> returns a summary of matching messages (subject, sender, date, snippet).
+                <br />
+                <strong>Read Email</strong> fetches the <em>complete content</em> of one specific email — full body text, all headers, and label info — using its Message ID. Use it after a List Emails step to retrieve the full details of a message.
+              </p>
+            </div>
+          </div>
+          <ExpressionInput
+            label="Message ID"
+            value={String(cfg.messageId ?? '')}
+            onChange={(v) => onChange({ messageId: v })}
+            placeholder="Paste an ID or insert from a List Emails result"
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+        </>
       )}
     </div>
   );

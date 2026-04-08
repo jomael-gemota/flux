@@ -121,13 +121,19 @@ export class SlackNode implements NodeExecutor {
             if (!channel) throw new Error('Slack read_messages: channel is required');
 
             const res = await client.conversations.history({ channel, limit });
-            const messages = (res.messages ?? []).map((m) => ({
-                ts:     m.ts,
-                text:   m.text,
-                user:   m.user,
-                type:   m.type,
-                botId:  m.bot_id,
-            }));
+            const messages = (res.messages ?? []).map((m) => {
+                const raw = m as Record<string, unknown>;
+                return {
+                    ts:         m.ts,
+                    text:       m.text,
+                    user:       m.user,
+                    type:       m.type,
+                    botId:      m.bot_id,
+                    // Thread info: replyCount > 0 means this message started a thread
+                    replyCount: typeof raw.reply_count === 'number' ? raw.reply_count : undefined,
+                    threadTs:   typeof raw.thread_ts   === 'string' ? raw.thread_ts   : undefined,
+                };
+            });
 
             return {
                 ok:       res.ok,
