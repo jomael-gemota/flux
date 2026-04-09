@@ -12,6 +12,9 @@ export interface CanvasNodeData extends Record<string, unknown> {
   retryDelayMs?: number;
   timeoutMs?: number;
   disabled?: boolean;
+  /** Sticky note fields (nodeType === 'sticky') */
+  content?: string;
+  color?: string;
 }
 
 export type CanvasNode = Node<CanvasNodeData>;
@@ -71,6 +74,10 @@ interface WorkflowStore {
   isExecuting: boolean;
   setIsExecuting: (v: boolean) => void;
 
+  // Sticky note targeted updates (avoids full setNodes re-render)
+  updateStickyNoteContent: (id: string, content: string) => void;
+  updateStickyNoteColor: (id: string, color: string) => void;
+
   // Canvas empty-state helpers
   /** Creates a blank unsaved workflow and makes it active */
   createNewWorkflow: (projectId?: string) => void;
@@ -128,6 +135,21 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
   beginExecution: (statuses) => set({ executionStatuses: statuses, isExecuting: true }),
   isExecuting: false,
   setIsExecuting: (v) => set({ isExecuting: v }),
+
+  updateStickyNoteContent: (id, content) =>
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        n.id === id ? { ...n, data: { ...n.data, content } } : n
+      ),
+      isDirty: true,
+    })),
+  updateStickyNoteColor: (id, color) =>
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        n.id === id ? { ...n, data: { ...n.data, color } } : n
+      ),
+      isDirty: true,
+    })),
 
   createNewWorkflow: (projectId) => {
     const newWf: WorkflowDefinition = {

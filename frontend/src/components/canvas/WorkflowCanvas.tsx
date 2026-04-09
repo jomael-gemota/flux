@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -16,12 +16,15 @@ import {
   type NodeChange,
   type EdgeChange,
   type Viewport,
+  type OnSelectionChangeParams,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useWorkflowStore, type CanvasNode, type CanvasEdge, type CanvasNodeData } from '../../store/workflowStore';
 import { ExecutionEdge, type EdgeExecutionStatus } from '../edges/ExecutionEdge';
 import { NodePickerPopup } from './NodePickerPopup';
+import { ContextMenu, type ContextMenuState } from './ContextMenu';
 import { nodeAccentColor } from '../nodes/NodeIcons';
+import { StickyNoteNode } from '../nodes/StickyNoteNode';
 import { HttpNodeWidget } from '../nodes/HttpNodeWidget';
 import { LLMNodeWidget } from '../nodes/LLMNodeWidget';
 import { ConditionNodeWidget } from '../nodes/ConditionNodeWidget';
@@ -43,6 +46,8 @@ import { createPortal } from 'react-dom';
 function randomId() {
   return Math.random().toString(36).slice(2, 10);
 }
+
+// ── Node renderers ────────────────────────────────────────────────────────────
 
 function WorkflowNodeRenderer(props: NodeProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -67,7 +72,10 @@ function WorkflowNodeRenderer(props: NodeProps) {
   }
 }
 
-const nodeTypes: NodeTypes = { workflowNode: WorkflowNodeRenderer };
+const nodeTypes: NodeTypes = {
+  workflowNode: WorkflowNodeRenderer,
+  stickyNote: StickyNoteNode as unknown as React.ComponentType<NodeProps>,
+};
 const edgeTypes: EdgeTypes = { execution: ExecutionEdge };
 
 const DEFAULT_CONFIGS: Partial<Record<NodeType, Record<string, unknown>>> = {
@@ -92,13 +100,8 @@ function resolveEdgeStatus(
   tgtStatus: string | undefined,
   isExecuting: boolean
 ): EdgeExecutionStatus {
-  // ── Pre-execution dim phase ───────────────────────────────────────
   if (srcStatus === 'waiting' || tgtStatus === 'waiting') return 'waiting';
-
-  // ── No execution data yet ─────────────────────────────────────────
   if (!srcStatus) return 'idle';
-
-  // ── Live execution ────────────────────────────────────────────────
   if (srcStatus === 'running') return 'flowing';
   if (srcStatus === 'success') {
     if (tgtStatus === 'skipped') return 'skipped';
@@ -110,6 +113,8 @@ function resolveEdgeStatus(
   if (srcStatus === 'skipped') return 'skipped';
   return 'idle';
 }
+
+// ── Main canvas ───────────────────────────────────────────────────────────────
 
 export function WorkflowCanvas() {
   const {
@@ -132,7 +137,19 @@ export function WorkflowCanvas() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [projectNameInput, setProjectNameInput] = useState('');
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const projectNameInputRef = useRef<HTMLInputElement>(null);
+  const rfInstance = useRef<ReactFlowInstance<CanvasNode> | null>(null);
+  const isDark = theme === 'dark';
+
+  // Refs kept in sync with latest nodes/edges for keyboard handler (avoids stale closure)
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+
+  // Clipboard for copy/paste (transient — not persisted)
+  const clipboardRef = useRef<CanvasNode[]>([]);
 
   function openProjectModal() {
     setProjectNameInput('');
@@ -148,11 +165,8 @@ export function WorkflowCanvas() {
     setProjectNameInput('');
   }
 
-  const rfInstance = useRef<ReactFlowInstance<CanvasNode> | null>(null);
-  const isDark = theme === 'dark';
+  // ── Viewport restore ────────────────────────────────────────────────────────
 
-  // Restore the saved viewport (or fitView) whenever the active workflow changes.
-  // requestAnimationFrame ensures React Flow has committed the new nodes before we act.
   useEffect(() => {
     if (!rfInstance.current || !activeWorkflow) return;
     const vp = activeWorkflow.viewport;
@@ -166,13 +180,14 @@ export function WorkflowCanvas() {
     });
   }, [activeWorkflow?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Capture the viewport after every pan/zoom so it's ready when Save is pressed.
   const onMoveEnd = useCallback(
     (_event: MouseEvent | TouchEvent | null, vp: Viewport) => {
       setCanvasViewport(vp);
     },
     [setCanvasViewport],
   );
+
+  // ── RF change handlers ──────────────────────────────────────────────────────
 
   const onNodesChange = useCallback(
     (changes: NodeChange<CanvasNode>[]) => {
@@ -195,6 +210,8 @@ export function WorkflowCanvas() {
     [edges, setEdges]
   );
 
+  // ── Drop from palette ───────────────────────────────────────────────────────
+
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
@@ -210,7 +227,7 @@ export function WorkflowCanvas() {
       });
 
       const id = `node-${randomId()}`;
-      const isFirst = nodes.length === 0;
+      const isFirst = nodes.filter(n => n.type !== 'stickyNote').length === 0;
       const newNode: CanvasNode = {
         id,
         type: 'workflowNode',
@@ -229,8 +246,33 @@ export function WorkflowCanvas() {
     [nodes, setNodes, setDirty]
   );
 
+  // ── Selection handling ──────────────────────────────────────────────────────
+
+  const onSelectionChange = useCallback(
+    ({ nodes: selected }: OnSelectionChangeParams) => {
+      const workflowSelected = selected.filter((n) => n.type !== 'stickyNote');
+      if (workflowSelected.length === 1 && selected.length === 1) {
+        // Exactly one workflow node selected — open config
+        setSelectedNodeId(workflowSelected[0].id);
+        setConfigOpen(true);
+      } else if (selected.length === 0) {
+        setSelectedNodeId(null);
+        setConfigOpen(false);
+      } else {
+        // Multiple selections or only sticky notes — close config
+        setSelectedNodeId(null);
+        setConfigOpen(false);
+      }
+    },
+    [setSelectedNodeId, setConfigOpen]
+  );
+
   const onNodeClick = useCallback(
-    (_: React.MouseEvent, node: CanvasNode) => {
+    (event: React.MouseEvent, node: CanvasNode) => {
+      // Multi-select: suppress config panel
+      if (event.ctrlKey || event.metaKey || event.shiftKey) return;
+      // Sticky notes: no config panel
+      if (node.type === 'stickyNote') return;
       setSelectedNodeId(node.id);
       setConfigOpen(true);
     },
@@ -239,6 +281,7 @@ export function WorkflowCanvas() {
 
   const onNodeDoubleClick = useCallback(
     (_: React.MouseEvent, node: CanvasNode) => {
+      if (node.type === 'stickyNote') return; // StickyNoteNode handles its own double-click
       setSelectedNodeId(node.id);
       setConfigOpen(true);
     },
@@ -248,9 +291,143 @@ export function WorkflowCanvas() {
   const onPaneClick = useCallback(() => {
     setSelectedNodeId(null);
     setConfigOpen(false);
+    setContextMenu(null);
   }, [setSelectedNodeId, setConfigOpen]);
 
-  // Add a node from the floating picker — placed in the visible center of the viewport
+  // ── Right-click context menu ────────────────────────────────────────────────
+
+  const onNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: CanvasNode) => {
+      event.preventDefault();
+      setContextMenu({
+        nodeId: node.id,
+        nodeType: node.type ?? 'workflowNode',
+        x: event.clientX,
+        y: event.clientY,
+      });
+    },
+    []
+  );
+
+  const handleDuplicate = useCallback(
+    (nodeId: string) => {
+      const source = nodesRef.current.find((n) => n.id === nodeId);
+      if (!source) return;
+      const prefix = source.type === 'stickyNote' ? 'sticky' : 'node';
+      const newNode: CanvasNode = {
+        ...source,
+        id: `${prefix}-${randomId()}`,
+        position: { x: source.position.x + 24, y: source.position.y + 24 },
+        selected: false,
+      };
+      setNodes([...nodesRef.current, newNode]);
+      setDirty(true);
+    },
+    [setNodes, setDirty]
+  );
+
+  const handleDelete = useCallback(
+    (nodeId: string) => {
+      setNodes(nodesRef.current.filter((n) => n.id !== nodeId));
+      setEdges(edgesRef.current.filter((e) => e.source !== nodeId && e.target !== nodeId));
+      setDirty(true);
+    },
+    [setNodes, setEdges, setDirty]
+  );
+
+  // ── Keyboard: copy/paste, duplicate ────────────────────────────────────────
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement;
+      // Don't intercept when typing in inputs / contenteditable areas
+      if (
+        target.isContentEditable ||
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA'
+      ) return;
+
+      const ctrlOrMeta = e.ctrlKey || e.metaKey;
+
+      if (ctrlOrMeta && e.key === 'c') {
+        clipboardRef.current = nodesRef.current.filter((n) => n.selected);
+      }
+
+      if (ctrlOrMeta && e.key === 'v') {
+        if (clipboardRef.current.length === 0) return;
+        const pasted = clipboardRef.current.map((n) => {
+          const prefix = n.type === 'stickyNote' ? 'sticky' : 'node';
+          return {
+            ...n,
+            id: `${prefix}-${randomId()}`,
+            position: { x: n.position.x + 24, y: n.position.y + 24 },
+            selected: true,
+          } as CanvasNode;
+        });
+        setNodes([
+          ...nodesRef.current.map((n) => ({ ...n, selected: false })),
+          ...pasted,
+        ]);
+        setDirty(true);
+      }
+
+      // Ctrl+D: duplicate selected
+      if (ctrlOrMeta && e.key === 'd') {
+        e.preventDefault();
+        const selected = nodesRef.current.filter((n) => n.selected);
+        if (selected.length === 0) return;
+        const duped = selected.map((n) => {
+          const prefix = n.type === 'stickyNote' ? 'sticky' : 'node';
+          return {
+            ...n,
+            id: `${prefix}-${randomId()}`,
+            position: { x: n.position.x + 24, y: n.position.y + 24 },
+            selected: false,
+          } as CanvasNode;
+        });
+        setNodes([...nodesRef.current, ...duped]);
+        setDirty(true);
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [setNodes, setDirty]); // intentionally minimal deps — use refs for nodes
+
+  // ── Add sticky note ─────────────────────────────────────────────────────────
+
+  const handleAddStickyNote = useCallback(() => {
+    const rf = rfInstance.current;
+    const position = rf
+      ? rf.screenToFlowPosition({
+          x: window.innerWidth / 2,
+          y: window.innerHeight / 2,
+        })
+      : { x: 100, y: 100 };
+
+    const id = `sticky-${randomId()}`;
+    const newNote: CanvasNode = {
+      id,
+      type: 'stickyNote',
+      position,
+      zIndex: -1,
+      style: { width: 260, height: 200 },
+      data: {
+        label: 'Sticky Note',
+        nodeType: 'sticky',
+        config: {},
+        isEntry: false,
+        content: '',
+        color: 'yellow',
+      },
+    };
+
+    setNodes([...nodes, newNote]);
+    setDirty(true);
+  }, [nodes, setNodes, setDirty]);
+
+  // ── Add node from picker ────────────────────────────────────────────────────
+
   const handlePickerSelect = useCallback(
     (type: NodeType, label: string) => {
       const rf = rfInstance.current;
@@ -262,7 +439,7 @@ export function WorkflowCanvas() {
         : { x: 200 + nodes.length * 30, y: 200 + nodes.length * 30 };
 
       const id = `node-${randomId()}`;
-      const isFirst = nodes.length === 0;
+      const isFirst = nodes.filter(n => n.type !== 'stickyNote').length === 0;
       const newNode: CanvasNode = {
         id,
         type: 'workflowNode',
@@ -283,7 +460,8 @@ export function WorkflowCanvas() {
     [nodes, setNodes, setSelectedNodeId, setConfigOpen, setDirty]
   );
 
-  // Derive per-edge execution status and stamp it into edge.data
+  // ── Styled edges (execution overlay) ───────────────────────────────────────
+
   const styledEdges = useMemo<CanvasEdge[]>(() => {
     return edges.map((edge) => {
       const execStatus = resolveEdgeStatus(
@@ -300,12 +478,12 @@ export function WorkflowCanvas() {
     });
   }, [edges, executionStatuses, isExecuting]);
 
+  // ── Empty state ─────────────────────────────────────────────────────────────
+
   if (!activeWorkflow) {
     return (
       <div className="h-full flex items-center justify-center bg-[#E9EEF6] dark:bg-[#171717]">
-        {/* ── No workflow selected — n8n-style onboarding card ── */}
         <div className="flex flex-col items-center gap-6 select-none">
-          {/* Decorative icon cluster */}
           <div className="relative w-20 h-20">
             <div className="absolute inset-0 rounded-2xl bg-blue-100 dark:bg-blue-500/10 flex items-center justify-center shadow-lg">
               <Workflow className="w-9 h-9 text-blue-400 dark:text-blue-400" strokeWidth={1.5} />
@@ -324,7 +502,6 @@ export function WorkflowCanvas() {
             </p>
           </div>
 
-          {/* Action buttons */}
           <div className="flex items-center gap-3">
             <button
               onClick={() => createNewWorkflow()}
@@ -355,8 +532,16 @@ export function WorkflowCanvas() {
     );
   }
 
+  const workflowNodeCount = nodes.filter((n) => n.type !== 'stickyNote').length;
+
   return (
     <div className="h-full w-full relative">
+      {/* Force sticky notes behind regular nodes regardless of selection */}
+      <style>{`
+        .react-flow__node-stickyNote { z-index: -1 !important; }
+        .react-flow__node-stickyNote.selected { z-index: -1 !important; }
+      `}</style>
+
       <ReactFlow
         nodes={nodes}
         edges={styledEdges}
@@ -368,9 +553,11 @@ export function WorkflowCanvas() {
         onNodeClick={onNodeClick}
         onNodeDoubleClick={onNodeDoubleClick}
         onPaneClick={onPaneClick}
+        onNodeContextMenu={onNodeContextMenu}
+        onPaneContextMenu={(e) => e.preventDefault()}
+        onSelectionChange={onSelectionChange}
         onInit={(instance) => {
           rfInstance.current = instance;
-          // Handle the very first render — rfInstance wasn't set when the effect ran
           const vp = activeWorkflow?.viewport;
           requestAnimationFrame(() => {
             if (vp) {
@@ -385,6 +572,8 @@ export function WorkflowCanvas() {
         edgeTypes={edgeTypes}
         defaultEdgeOptions={{ type: 'execution' }}
         deleteKeyCode="Delete"
+        multiSelectionKeyCode={['Meta', 'Control']}
+        selectionKeyCode="Shift"
         className={isDark ? '!bg-[#171717]' : '!bg-[#E9EEF6]'}
       >
         <Background
@@ -406,20 +595,33 @@ export function WorkflowCanvas() {
               ? '!bg-slate-900/60 !backdrop-blur-md !border-white/15'
               : '!bg-white/80 !backdrop-blur-md !border-slate-200'
           }
-          nodeColor={(node) => nodeAccentColor((node.data as CanvasNodeData).nodeType)}
+          nodeColor={(node) =>
+            node.type === 'stickyNote'
+              ? '#fef08a'
+              : nodeAccentColor((node.data as CanvasNodeData).nodeType)
+          }
           maskColor={isDark ? 'rgba(15,23,42,0.7)' : 'rgba(241,245,249,0.7)'}
         />
       </ReactFlow>
 
-      {/* Floating node picker — sits above the React Flow canvas */}
+      {/* Node picker + sticky note button */}
       <NodePickerPopup
         onSelect={handlePickerSelect}
+        onAddStickyNote={handleAddStickyNote}
         open={pickerOpen}
         onOpenChange={setPickerOpen}
       />
 
-      {/* ── Empty workflow overlay — shown when the canvas has no nodes yet ── */}
-      {nodes.length === 0 && !pickerOpen && (
+      {/* Right-click context menu */}
+      <ContextMenu
+        menu={contextMenu}
+        onDuplicate={handleDuplicate}
+        onDelete={handleDelete}
+        onClose={() => setContextMenu(null)}
+      />
+
+      {/* Empty workflow overlay */}
+      {workflowNodeCount === 0 && !pickerOpen && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="flex flex-col items-center gap-4 pointer-events-auto select-none">
             <button
@@ -445,8 +647,8 @@ export function WorkflowCanvas() {
   );
 }
 
-// ── New Project modal — portal-rendered so it escapes overflow:hidden parents ──
-// (exported so WorkflowCanvas can use it, but also used internally above)
+// ── New Project modal ─────────────────────────────────────────────────────────
+
 export function NewProjectModal({
   open,
   inputRef,
@@ -473,7 +675,6 @@ export function NewProjectModal({
         className="w-full max-w-sm bg-white dark:bg-[#1E293B] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100 dark:border-slate-700/60">
           <div className="flex items-center gap-2.5">
             <span className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-500/15 flex items-center justify-center">
@@ -489,7 +690,6 @@ export function NewProjectModal({
           </button>
         </div>
 
-        {/* Body */}
         <div className="px-5 py-4">
           <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">
             Project name
@@ -508,7 +708,6 @@ export function NewProjectModal({
           />
         </div>
 
-        {/* Footer */}
         <div className="px-5 pb-5 flex items-center justify-end gap-2">
           <button
             onClick={onClose}

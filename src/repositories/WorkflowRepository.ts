@@ -13,12 +13,13 @@ function workflowFilter(id: string, userId?: string): Record<string, unknown> {
 
 /**
  * Stable hash of the content-significant parts of a workflow definition.
- * Excludes `version` (metadata) and `viewport` (view-only pan/zoom state)
- * so that saving those fields alone does not bump the version counter.
+ * Excludes `version` (metadata), `viewport` (view-only pan/zoom state), and
+ * `stickyNotes` (canvas-only annotations) so that saving those fields alone
+ * does not bump the version counter.
  */
 function contentHash(def: WorkflowDefinition): string {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { version: _v, viewport: _vp, ...content } = def;
+    const { version: _v, viewport: _vp, stickyNotes: _sn, ...content } = def;
     return JSON.stringify(content);
 }
 

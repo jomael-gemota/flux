@@ -19,6 +19,15 @@ const ViewportSchema = z.object({
     zoom: z.number().positive(),
 });
 
+const StickyNoteSchema = z.object({
+    id: z.string().min(1),
+    position: z.object({ x: z.number(), y: z.number() }),
+    width: z.number().positive(),
+    height: z.number().positive(),
+    content: z.string(),
+    color: z.string(),
+});
+
 export const WorkflowDefinitionSchema = z.object({
     id: z.string().min(1),
     name: z.string().min(1),
@@ -28,6 +37,7 @@ export const WorkflowDefinitionSchema = z.object({
     nodes: z.array(WorkflowNodeSchema).min(1, 'Workflow must have at least one node'),
     schedule: z.string().optional(),
     viewport: ViewportSchema.optional(),
+    stickyNotes: z.array(StickyNoteSchema).optional(),
 });
 
 export const TriggerWorkflowSchema = z.object({
@@ -57,6 +67,7 @@ export const UpdateWorkflowSchema = z.object({
     // min(1) removed: a single-entry workflow sends a one-item array
     entryNodeIds: z.array(z.string().min(1)).optional(),
     viewport: ViewportSchema.optional(),
+    stickyNotes: z.array(StickyNoteSchema).optional(),
 });
 
 export const CursorPaginationSchema = z.object({

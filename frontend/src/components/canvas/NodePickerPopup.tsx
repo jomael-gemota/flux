@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Plus, Search, ChevronDown, ChevronRight, X, GripVertical } from 'lucide-react';
+import { Plus, Search, ChevronDown, ChevronRight, X, GripVertical, StickyNote } from 'lucide-react';
 import { NodeIcon, nodeHeaderColor } from '../nodes/NodeIcons';
 import type { NodeType } from '../../types/workflow';
 
@@ -179,12 +179,13 @@ function CategorySection({
 
 interface NodePickerPopupProps {
   onSelect: (type: NodeType, label: string) => void;
+  onAddStickyNote?: () => void;
   /** Controlled open state — when provided the component runs in controlled mode */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
 
-export function NodePickerPopup({ onSelect, open: controlledOpen, onOpenChange }: NodePickerPopupProps) {
+export function NodePickerPopup({ onSelect, onAddStickyNote, open: controlledOpen, onOpenChange }: NodePickerPopupProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : internalOpen;
@@ -280,6 +281,25 @@ export function NodePickerPopup({ onSelect, open: controlledOpen, onOpenChange }
         />
         Add Node
       </button>
+
+      {/* ── Sticky Note button ──────────────────────────────────────────── */}
+      {onAddStickyNote && (
+        <button
+          type="button"
+          onClick={onAddStickyNote}
+          title="Add a sticky note"
+          className="mt-1.5 flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold shadow-lg transition-all duration-200 select-none border
+                     bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700
+                     text-slate-700 dark:text-slate-200
+                     hover:bg-amber-50 dark:hover:bg-amber-500/10
+                     hover:border-amber-300 dark:hover:border-amber-600
+                     hover:text-amber-700 dark:hover:text-amber-400
+                     shadow-black/10 dark:shadow-black/40"
+        >
+          <StickyNote className="w-4 h-4" />
+          Sticky Note
+        </button>
+      )}
 
       {/* ── Floating panel ───────────────────────────────────────────────── */}
       {open && (

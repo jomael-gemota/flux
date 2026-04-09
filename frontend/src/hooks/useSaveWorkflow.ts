@@ -20,9 +20,10 @@ export function useSaveWorkflow() {
       useWorkflowStore.getState();
 
     if (!activeWorkflow) return;
-    if (nodes.length === 0) return;
+    const workflowNodes = nodes.filter((n) => n.type !== 'stickyNote');
+    if (workflowNodes.length === 0) return;
 
-    const entryNodes = nodes.filter((n) => n.data.isEntry);
+    const entryNodes = nodes.filter((n) => n.type !== 'stickyNote' && n.data.isEntry);
     const entryNodeId = entryNodes[0]?.id ?? activeWorkflow.entryNodeId;
     const entryNodeIds =
       entryNodes.length > 0 ? entryNodes.map((n) => n.id) : undefined;
@@ -53,6 +54,7 @@ export function useSaveWorkflow() {
           entryNodeId: def.entryNodeId,
           entryNodeIds: def.entryNodeIds,
           viewport: def.viewport,
+          stickyNotes: def.stickyNotes,
         },
       });
       if (updated) {

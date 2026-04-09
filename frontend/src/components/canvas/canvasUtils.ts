@@ -1,5 +1,5 @@
 import type { CanvasEdge, CanvasNode } from '../../store/workflowStore';
-import type { WorkflowDefinition, WorkflowNode } from '../../types/workflow';
+import type { WorkflowDefinition, WorkflowNode, PersistedStickyNote } from '../../types/workflow';
 
 const NODE_WIDTH = 200;
 const NODE_HEIGHT = 80;
@@ -23,7 +23,7 @@ export function deserialize(workflow: WorkflowDefinition): {
   );
   const isParallel = entrySet.size > 1;
 
-  const nodes: CanvasNode[] = workflow.nodes.map((wn, i) => ({
+  const workflowNodes: CanvasNode[] = workflow.nodes.map((wn, i) => ({
     id: wn.id,
     type: 'workflowNode',
     // Prefer the saved canvas position, then the auto-computed position,
@@ -41,6 +41,25 @@ export function deserialize(workflow: WorkflowDefinition): {
       disabled: wn.disabled,
     },
   }));
+
+  // Restore sticky notes (canvas-only, not workflow logic)
+  const stickyNodes: CanvasNode[] = (workflow.stickyNotes ?? []).map((sn) => ({
+    id: sn.id,
+    type: 'stickyNote',
+    position: sn.position,
+    zIndex: -1,
+    style: { width: sn.width, height: sn.height },
+    data: {
+      label: 'Sticky Note',
+      nodeType: 'sticky',
+      config: {},
+      isEntry: false,
+      content: sn.content,
+      color: sn.color,
+    },
+  }));
+
+  const nodes: CanvasNode[] = [...workflowNodes, ...stickyNodes];
 
   const edges: CanvasEdge[] = [];
 
@@ -88,7 +107,21 @@ export function serialize(
   _entryNodeIds?: string[],
   viewport?: { x: number; y: number; zoom: number } | null,
 ): WorkflowDefinition {
-  const nodes: WorkflowNode[] = rfNodes.map((rfn) => {
+  // Separate sticky notes from workflow nodes before serializing
+  const rfWorkflowNodes = rfNodes.filter((n) => n.type !== 'stickyNote');
+
+  const stickyNotes: PersistedStickyNote[] = rfNodes
+    .filter((n) => n.type === 'stickyNote')
+    .map((n) => ({
+      id: n.id,
+      position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
+      width: Math.round(Number(n.measured?.width ?? n.style?.width ?? 200)),
+      height: Math.round(Number(n.measured?.height ?? n.style?.height ?? 150)),
+      content: String(n.data.content ?? ''),
+      color: String(n.data.color ?? 'yellow'),
+    }));
+
+  const nodes: WorkflowNode[] = rfWorkflowNodes.map((rfn) => {
     const d = rfn.data;
     const nodeType = d.nodeType as WorkflowNode['type'];
 
@@ -203,7 +236,8 @@ export function serialize(
     .map(n => n.id);
 
   // Collect all canvas nodes marked as entry, filtered to those that still exist
-  const manualEntryIds = rfNodes
+  // (exclude sticky notes — they are never entry nodes)
+  const manualEntryIds = rfWorkflowNodes
     .filter(n => n.data.isEntry && validNodeIds.has(n.id))
     .map(n => n.id);
 
@@ -229,6 +263,7 @@ export function serialize(
     entryNodeIds: resolvedEntryIds.length > 0 ? resolvedEntryIds : undefined,
     schedule,
     viewport: viewport ?? undefined,
+    stickyNotes: stickyNotes.length > 0 ? stickyNotes : undefined,
   };
 }
 

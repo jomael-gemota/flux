@@ -29,6 +29,15 @@ export interface WorkflowNode {
     position?: { x: number; y: number };
 }
 
+export interface PersistedStickyNote {
+    id: string;
+    position: { x: number; y: number };
+    width: number;
+    height: number;
+    content: string;
+    color: string;
+}
+
 export interface WorkflowDefinition {
     id: string;
     name: string;
@@ -39,6 +48,8 @@ export interface WorkflowDefinition {
     schedule?: string;
     /** Canvas pan/zoom saved with the workflow so the view is restored on load */
     viewport?: { x: number; y: number; zoom: number };
+    /** Canvas sticky-note annotations — stored inside definition, not workflow logic */
+    stickyNotes?: PersistedStickyNote[];
 }
 
 export interface ExecutionContext {
