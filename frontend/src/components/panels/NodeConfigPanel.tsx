@@ -74,16 +74,39 @@ const NODE_OUTPUT_FIELDS: Record<string, OutputField[]> = {
     { key: 'newName',      label: 'New name after rename' },
   ],
   gdocs: [
-    { key: 'documentId', label: 'Document ID' },
-    { key: 'title', label: 'Document title' },
-    { key: 'text', label: 'Document text content (read)' },
-    { key: 'url', label: 'Edit URL (create)' },
+    { key: 'documentId',  label: 'Document ID' },
+    { key: 'title',       label: 'Document title' },
+    { key: 'text',        label: 'Document text content (read)' },
+    { key: 'url',         label: 'Edit URL (create)' },
+    { key: 'webViewLink', label: 'Open link (create / rename)' },
+    { key: 'newTitle',    label: 'New title after rename' },
+    { key: 'appended',    label: 'Appended content types (append)' },
+    { key: 'revisionId',  label: 'Revision ID (read)' },
   ],
   gsheets: [
-    { key: 'data', label: 'Rows as objects (read)' },
-    { key: 'headers', label: 'Column headers (read)' },
-    { key: 'rows', label: 'Raw rows array (read)' },
-    { key: 'updatedRows', label: 'Rows updated (write/append)' },
+    { key: 'data',           label: 'Rows as objects (read / get_rows)' },
+    { key: 'headers',        label: 'Column headers (read / get_rows)' },
+    { key: 'rows',           label: 'Raw rows 2-D array (read)' },
+    { key: 'total',          label: 'Total rows returned' },
+    { key: 'updatedRows',    label: 'Rows updated (write / append / update_row)' },
+    { key: 'appendedRows',   label: 'Rows appended (append_row)' },
+    { key: 'updatedRange',   label: 'Updated range (write / append / update_row)' },
+    { key: 'spreadsheetId',  label: 'Spreadsheet ID' },
+    { key: 'url',            label: 'Open URL (create_spreadsheet)' },
+    { key: 'deleted',        label: 'Deleted flag (delete_*)' },
+    { key: 'sheetId',        label: 'Sheet ID (create_sheet)' },
+    { key: 'clearedRange',   label: 'Cleared range (clear_sheet)' },
+    { key: 'action',         label: '"appended" or "updated" (append_update_row)' },
+    { key: 'rowIndex',       label: 'Matched row index (append_update_row)' },
+    { key: 'startColumn',    label: 'Start column letter (append_to_row)' },
+    { key: 'appendedCells',  label: 'Cells appended (append_to_row)' },
+    { key: 'startRow',       label: 'Start row number (append_to_column)' },
+    { key: 'column',         label: 'Column letter (append_to_column)' },
+    { key: 'insertedRows',   label: 'Inserted row count (insert_rows)' },
+    { key: 'insertedColumns', label: 'Inserted column count (insert_columns)' },
+    { key: 'startIndex',     label: 'Start index (insert_*/delete_*)' },
+    { key: 'formatted',      label: 'Formatted flag (format_cells)' },
+    { key: 'fieldsApplied',  label: 'Format fields applied (format_cells)' },
   ],
   basecamp: [
     { key: 'id', label: 'Created/matched resource ID' },
@@ -4485,7 +4508,7 @@ function GmailConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
 // ── GDrive sub-components ──────────────────────────────────────────────────────
 
 /** Inline folder browser — lets the user navigate Drive and pick a folder. */
-function GDriveFolderBrowser({ credentialId, value, valuePath, onChange, label = 'Folder', placeholder = 'My Drive (root)', foldersOnly = true }: {
+function GDriveFolderBrowser({ credentialId, value, valuePath, onChange, label = 'Folder', placeholder = 'My Drive (root)', foldersOnly = true, mimeTypeFilter }: {
   credentialId: string;
   value: string;
   valuePath: string;
@@ -4493,6 +4516,8 @@ function GDriveFolderBrowser({ credentialId, value, valuePath, onChange, label =
   label?: string;
   placeholder?: string;
   foldersOnly?: boolean;
+  /** When set, only files matching this MIME type appear (folders always show for navigation). */
+  mimeTypeFilter?: string;
 }) {
   const [open, setOpen]           = useState(false);
   const [browseFolderId, setBrowseFolderId] = useState<string>('root');
@@ -4534,7 +4559,9 @@ function GDriveFolderBrowser({ credentialId, value, valuePath, onChange, label =
 
   const items = data?.items ?? [];
   const folders = items.filter((i) => i.mimeType === 'application/vnd.google-apps.folder');
-  const files   = items.filter((i) => i.mimeType !== 'application/vnd.google-apps.folder');
+  const files   = items
+    .filter((i) => i.mimeType !== 'application/vnd.google-apps.folder')
+    .filter((i) => !mimeTypeFilter || i.mimeType === mimeTypeFilter);
 
   const displayPath = valuePath || (value ? value : '');
 
@@ -5424,12 +5451,84 @@ function GDriveConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
 
 // ── GDocsConfig ────────────────────────────────────────────────────────────────
 
+/** Picker for a Google Doc — browse Drive (filtered to Docs) or search by name/owner/folder. */
+function GDocsDocumentPicker({ cfg, onChange, label = 'Document', otherNodes, testResults }: {
+  cfg: Record<string, unknown>;
+  onChange: (p: Partial<Record<string, unknown>>) => void;
+  label?: string;
+  otherNodes: ConfigProps['otherNodes'];
+  testResults: ConfigProps['testResults'];
+}) {
+  const credentialId = String(cfg.credentialId ?? '');
+  const [mode, setMode] = useState<'browse' | 'search'>(() =>
+    (cfg.documentName || cfg.owner || cfg.searchFolderId) ? 'search' : 'browse'
+  );
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">{label}</label>
+        <div className="flex rounded overflow-hidden border border-slate-200 dark:border-slate-700 text-[10px] shrink-0">
+          <button type="button" onClick={() => setMode('browse')}
+            className={`px-2 py-0.5 transition-colors ${mode === 'browse' ? 'bg-blue-500 text-white' : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
+            Browse Drive
+          </button>
+          <button type="button" onClick={() => setMode('search')}
+            className={`px-2 py-0.5 transition-colors ${mode === 'search' ? 'bg-blue-500 text-white' : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
+            Search / ID
+          </button>
+        </div>
+      </div>
+
+      {mode === 'browse' ? (
+        <GDriveFolderBrowser
+          credentialId={credentialId}
+          value={String(cfg.documentId ?? '')}
+          valuePath={String(cfg.documentPath ?? '')}
+          onChange={(id, path) => onChange({ documentId: id, documentPath: path, documentName: '', owner: '', searchFolderId: '' })}
+          label=""
+          placeholder="Browse and select a Google Doc"
+          foldersOnly={false}
+          mimeTypeFilter="application/vnd.google-apps.document"
+        />
+      ) : (
+        <div className="space-y-2 rounded-md border border-slate-200 dark:border-slate-700 p-2.5">
+          <ExpressionInput label="Document name (contains)" value={String(cfg.documentName ?? '')}
+            onChange={(v) => onChange({ documentName: v, documentId: '' })}
+            placeholder="Q4 Report, Invoice…"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Owner email (optional)" value={String(cfg.owner ?? '')}
+            onChange={(v) => onChange({ owner: v })}
+            placeholder="owner@example.com"
+            nodes={otherNodes} testResults={testResults} />
+          <GDriveFolderBrowser
+            credentialId={credentialId}
+            value={String(cfg.searchFolderId ?? '')}
+            valuePath={String(cfg.searchFolderPath ?? '')}
+            onChange={(id, path) => onChange({ searchFolderId: id, searchFolderPath: path })}
+            label="Search in folder (optional)"
+            placeholder="All of My Drive"
+          />
+          <div className="border-t border-slate-200 dark:border-slate-700 pt-2">
+            <ExpressionInput label="— or enter Document ID directly —" value={String(cfg.documentId ?? '')}
+              onChange={(v) => onChange({ documentId: v, documentName: '', owner: '', searchFolderId: '' })}
+              placeholder="{{nodes.x.documentId}} or paste an ID"
+              nodes={otherNodes} testResults={testResults} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GDocsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
-  const action = (cfg.action as string) ?? 'read';
+  const action       = (cfg.action as string) ?? 'read';
+  const credentialId = String(cfg.credentialId ?? '');
+
   return (
     <div className="space-y-3">
       <CredentialSelect
-        value={String(cfg.credentialId ?? '')}
+        value={credentialId}
         onChange={(id) => onChange({ credentialId: id })}
       />
       <Select
@@ -5437,12 +5536,16 @@ function GDocsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
         value={action}
         onChange={(e) => onChange({ action: e.target.value })}
         options={[
-          { value: 'create', label: 'Create Document' },
-          { value: 'read',   label: 'Read Document' },
-          { value: 'append', label: 'Append to Document' },
+          { group: 'Document Actions', options: [
+            { value: 'create', label: 'Create Document' },
+            { value: 'read',   label: 'Read Document' },
+            { value: 'append', label: 'Append to Document' },
+            { value: 'rename', label: 'Rename Document' },
+          ]},
         ]}
       />
 
+      {/* ── Create ──────────────────────────────────────────────── */}
       {action === 'create' && (
         <>
           <ExpressionInput label="Document title" value={String(cfg.title ?? '')}
@@ -5451,19 +5554,98 @@ function GDocsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
           <ExpressionTextArea label="Initial content (optional)" value={String(cfg.content ?? '')}
             onChange={(v) => onChange({ content: v })} placeholder="Starting text…"
             nodes={otherNodes} testResults={testResults} rows={4} />
+          <GDriveFolderBrowser
+            credentialId={credentialId}
+            value={String(cfg.folderId ?? '')}
+            valuePath={String(cfg.folderPath ?? '')}
+            onChange={(id, path) => onChange({ folderId: id, folderPath: path })}
+            label="Save in folder (optional)"
+            placeholder="My Drive (root)"
+          />
         </>
       )}
 
-      {(action === 'read' || action === 'append') && (
-        <ExpressionInput label="Document ID" value={String(cfg.documentId ?? '')}
-          onChange={(v) => onChange({ documentId: v })} placeholder="Google Docs document ID"
-          nodes={otherNodes} testResults={testResults} />
+      {/* ── Read ────────────────────────────────────────────────── */}
+      {action === 'read' && (
+        <GDocsDocumentPicker cfg={cfg} onChange={onChange} label="Document to read"
+          otherNodes={otherNodes} testResults={testResults} />
       )}
 
+      {/* ── Append ──────────────────────────────────────────────── */}
       {action === 'append' && (
-        <ExpressionTextArea label="Text to append" value={String(cfg.text ?? '')}
-          onChange={(v) => onChange({ text: v })} placeholder="Text to add at the end of the document"
-          nodes={otherNodes} testResults={testResults} rows={4} />
+        <>
+          <GDocsDocumentPicker cfg={cfg} onChange={onChange} label="Document to append to"
+            otherNodes={otherNodes} testResults={testResults} />
+
+          <ExpressionTextArea label="Text to append (optional)" value={String(cfg.text ?? '')}
+            onChange={(v) => onChange({ text: v })} placeholder="Text to add at the end of the document"
+            nodes={otherNodes} testResults={testResults} rows={3} />
+
+          {/* Link section */}
+          <div className="space-y-1">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={!!cfg.appendLink}
+                onChange={(e) => onChange({ appendLink: e.target.checked })}
+                className="w-3.5 h-3.5 rounded accent-blue-500" />
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Append a hyperlink</span>
+            </label>
+            {!!cfg.appendLink && (
+              <div className="space-y-2 pl-5">
+                <ExpressionInput label="Link text" value={String(cfg.linkText ?? '')}
+                  onChange={(v) => onChange({ linkText: v })} placeholder="Click here"
+                  nodes={otherNodes} testResults={testResults} />
+                <ExpressionInput label="Link URL" value={String(cfg.linkUrl ?? '')}
+                  onChange={(v) => onChange({ linkUrl: v })} placeholder="https://example.com"
+                  nodes={otherNodes} testResults={testResults} />
+              </div>
+            )}
+          </div>
+
+          {/* Image section */}
+          <div className="space-y-1">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={!!cfg.appendImage}
+                onChange={(e) => onChange({ appendImage: e.target.checked })}
+                className="w-3.5 h-3.5 rounded accent-blue-500" />
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Append an image</span>
+            </label>
+            {!!cfg.appendImage && (
+              <div className="space-y-2 pl-5">
+                <ExpressionInput label="Image URL (publicly accessible)" value={String(cfg.imageUrl ?? '')}
+                  onChange={(v) => onChange({ imageUrl: v })} placeholder="https://example.com/image.png"
+                  nodes={otherNodes} testResults={testResults}
+                  hint="The Google Docs API fetches the image from this URL — it must be publicly accessible." />
+                <div className="flex gap-2">
+                  <div className="flex-1 space-y-1">
+                    <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Width (pt)</label>
+                    <input type="number" min={10} max={600}
+                      value={Number(cfg.imageWidth ?? 200)}
+                      onChange={(e) => onChange({ imageWidth: Number(e.target.value) })}
+                      className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Height (pt)</label>
+                    <input type="number" min={10} max={600}
+                      value={Number(cfg.imageHeight ?? 200)}
+                      onChange={(e) => onChange({ imageHeight: Number(e.target.value) })}
+                      className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ── Rename ──────────────────────────────────────────────── */}
+      {action === 'rename' && (
+        <>
+          <GDocsDocumentPicker cfg={cfg} onChange={onChange} label="Document to rename"
+            otherNodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="New title" value={String(cfg.newTitle ?? '')}
+            onChange={(v) => onChange({ newTitle: v })} placeholder="My Renamed Document"
+            nodes={otherNodes} testResults={testResults} />
+        </>
       )}
     </div>
   );
@@ -5789,14 +5971,395 @@ function SlackConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
   );
 }
 
+// ── GSheetsFormatPanel ─────────────────────────────────────────────────────────
+
+/** Colour swatch + expression-aware hex input for font / background colour pickers. */
+function ColorPicker({ label, value, onChange, nodes, testResults }: {
+  label: string;
+  value: string;
+  onChange: (hex: string) => void;
+  nodes: CanvasNode[];
+  testResults: Record<string, NodeTestResult>;
+}) {
+  const isExpr = EXPR_RE.test(value);
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2">
+        {!isExpr && (
+          <input
+            type="color"
+            value={value || '#000000'}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-7 h-7 rounded cursor-pointer border border-slate-300 dark:border-slate-600 bg-transparent p-0.5 shrink-0"
+          />
+        )}
+        <div className="flex-1">
+          <ExpressionInput
+            label={label}
+            value={value}
+            onChange={onChange}
+            placeholder="#RRGGBB or {{nodes.x.color}}"
+            nodes={nodes}
+            testResults={testResults}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GSheetsFormatPanel({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
+  const credentialId = String(cfg.credentialId ?? '');
+
+  return (
+    <div className="space-y-3">
+      {/* Target range */}
+      <ExpressionInput label="Sheet name" value={String(cfg.sheetName ?? '')}
+        onChange={(v) => onChange({ sheetName: v })} placeholder="Sheet1"
+        nodes={otherNodes} testResults={testResults} />
+
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Range to format</label>
+        <div className="rounded-md border border-slate-200 dark:border-slate-700 p-2.5 space-y-2">
+          <ExpressionInput label="A1 notation (e.g. A1:D5, A:D, 1:3)" value={String(cfg.formatRange ?? '')}
+            onChange={(v) => onChange({ formatRange: v })}
+            placeholder="A1:D10 — overrides row/column fields below"
+            nodes={otherNodes} testResults={testResults} />
+          <div className="text-[10px] text-slate-400 dark:text-slate-500 text-center italic">— or specify rows and columns separately —</div>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <ExpressionInput label="Start row (1-based)"
+                value={String(cfg.formatRowStart ?? '')}
+                onChange={(v) => onChange({ formatRowStart: v || undefined })}
+                placeholder="1 or {{nodes.x.row}}"
+                nodes={otherNodes} testResults={testResults} />
+            </div>
+            <div className="flex-1">
+              <ExpressionInput label="End row (inclusive)"
+                value={String(cfg.formatRowEnd ?? '')}
+                onChange={(v) => onChange({ formatRowEnd: v || undefined })}
+                placeholder="same as start"
+                nodes={otherNodes} testResults={testResults} />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <ExpressionInput label="Start column (letter)"
+                value={String(cfg.formatColumnStart ?? '')}
+                onChange={(v) => onChange({ formatColumnStart: v || undefined })}
+                placeholder="A or {{nodes.x.col}}"
+                nodes={otherNodes} testResults={testResults} />
+            </div>
+            <div className="flex-1">
+              <ExpressionInput label="End column (letter, inclusive)"
+                value={String(cfg.formatColumnEnd ?? '')}
+                onChange={(v) => onChange({ formatColumnEnd: v || undefined })}
+                placeholder="same as start"
+                nodes={otherNodes} testResults={testResults} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Text style */}
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Text style</label>
+        <div className="flex flex-wrap gap-1.5">
+          {([['bold','B','font-bold'], ['italic','I','italic'], ['underline','U','underline'], ['strikethrough','S','line-through']] as const).map(([key, lbl, cls]) => (
+            <button key={key} type="button"
+              onClick={() => onChange({ [key]: cfg[key] === true ? undefined : cfg[key] === false ? true : true })}
+              className={`px-2.5 py-1 text-xs rounded border transition-colors ${cls} ${
+                cfg[key] === true
+                  ? 'bg-blue-500 text-white border-blue-500'
+                  : cfg[key] === false
+                    ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border-red-300 dark:border-red-700'
+                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:border-blue-400'
+              }`}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] text-slate-400 dark:text-slate-500">Click once to enable, click again to disable, click a third time to leave unchanged.</p>
+      </div>
+
+      {/* Font size */}
+      <div className="flex gap-2 items-end">
+        <div className="flex-1">
+          <ExpressionInput label="Font size (pt)"
+            value={String(cfg.fontSize ?? '')}
+            onChange={(v) => onChange({ fontSize: v || undefined })}
+            placeholder="Default or {{nodes.x.size}}"
+            nodes={otherNodes} testResults={testResults} />
+        </div>
+        <div className="flex-1">
+          <ColorPicker label="Font colour"
+            value={String(cfg.fontColor ?? '')}
+            onChange={(v) => onChange({ fontColor: v || undefined })}
+            nodes={otherNodes} testResults={testResults} />
+        </div>
+      </div>
+
+      {/* Background colour */}
+      <ColorPicker label="Cell background colour"
+        value={String(cfg.backgroundColor ?? '')}
+        onChange={(v) => onChange({ backgroundColor: v || undefined })}
+        nodes={otherNodes} testResults={testResults} />
+
+      {/* Number format */}
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Number format</label>
+        <select
+          value={String(cfg.numberFormat ?? '')}
+          onChange={(e) => onChange({ numberFormat: e.target.value || undefined })}
+          className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <option value="">— no change —</option>
+          <option value="TEXT">Text (plain text)</option>
+          <option value="NUMBER">Number (1234.56)</option>
+          <option value="CURRENCY">Currency ($1,234.56)</option>
+          <option value="PERCENT">Percent (12.34%)</option>
+          <option value="DATE">Date</option>
+          <option value="TIME">Time</option>
+          <option value="DATE_TIME">Date + Time</option>
+          <option value="SCIENTIFIC">Scientific (1.23E+03)</option>
+          <option value="FRACTION">Fraction (1/2)</option>
+          <option value="CUSTOM">Custom pattern…</option>
+        </select>
+        {cfg.numberFormat === 'CUSTOM' && (
+          <input type="text"
+            value={String(cfg.numberFormatPattern ?? '')}
+            onChange={(e) => onChange({ numberFormatPattern: e.target.value })}
+            placeholder='#,##0.00 — or — yyyy-MM-dd — or — "€"#,##0.00'
+            className="w-full mt-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+        )}
+      </div>
+
+      {/* Layout */}
+      <div className="space-y-2">
+        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Alignment &amp; wrap</label>
+        <div className="space-y-1">
+          <label className="block text-[10px] text-slate-400 dark:text-slate-500">Horizontal</label>
+          <div className="flex gap-1">
+            {(['LEFT','CENTER','RIGHT'] as const).map((v) => (
+              <button key={v} type="button"
+                onClick={() => onChange({ horizontalAlignment: cfg.horizontalAlignment === v ? undefined : v })}
+                className={`flex-1 py-1 text-xs rounded border transition-colors ${
+                  cfg.horizontalAlignment === v
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:border-blue-400'
+                }`}>
+                {v[0] + v.slice(1).toLowerCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-1">
+          <label className="block text-[10px] text-slate-400 dark:text-slate-500">Vertical</label>
+          <div className="flex gap-1">
+            {(['TOP','MIDDLE','BOTTOM'] as const).map((v) => (
+              <button key={v} type="button"
+                onClick={() => onChange({ verticalAlignment: cfg.verticalAlignment === v ? undefined : v })}
+                className={`flex-1 py-1 text-xs rounded border transition-colors ${
+                  cfg.verticalAlignment === v
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:border-blue-400'
+                }`}>
+                {v[0] + v.slice(1).toLowerCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-1">
+          <label className="block text-[10px] text-slate-400 dark:text-slate-500">Wrap</label>
+          <div className="flex gap-1">
+            {([['OVERFLOW_CELL','Overflow'],['CLIP','Clip'],['WRAP','Wrap']] as const).map(([v, lbl]) => (
+              <button key={v} type="button"
+                onClick={() => onChange({ wrapStrategy: cfg.wrapStrategy === v ? undefined : v })}
+                className={`flex-1 py-1 text-xs rounded border transition-colors ${
+                  cfg.wrapStrategy === v
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:border-blue-400'
+                }`}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── GSheetsConfig ──────────────────────────────────────────────────────────────
 
+/** Picker for a Google Spreadsheet — browse Drive (filtered to Sheets) or search by name/owner/folder. */
+function GSheetsSpreadsheetPicker({ cfg, onChange, label = 'Spreadsheet', otherNodes, testResults }: {
+  cfg: Record<string, unknown>;
+  onChange: (p: Partial<Record<string, unknown>>) => void;
+  label?: string;
+  otherNodes: ConfigProps['otherNodes'];
+  testResults: ConfigProps['testResults'];
+}) {
+  const credentialId = String(cfg.credentialId ?? '');
+  const [mode, setMode] = useState<'browse' | 'search'>(() =>
+    (cfg.spreadsheetName || cfg.owner || cfg.searchFolderId) ? 'search' : 'browse'
+  );
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">{label}</label>
+        <div className="flex rounded overflow-hidden border border-slate-200 dark:border-slate-700 text-[10px] shrink-0">
+          <button type="button" onClick={() => setMode('browse')}
+            className={`px-2 py-0.5 transition-colors ${mode === 'browse' ? 'bg-blue-500 text-white' : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
+            Browse Drive
+          </button>
+          <button type="button" onClick={() => setMode('search')}
+            className={`px-2 py-0.5 transition-colors ${mode === 'search' ? 'bg-blue-500 text-white' : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
+            Search / ID
+          </button>
+        </div>
+      </div>
+
+      {mode === 'browse' ? (
+        <GDriveFolderBrowser
+          credentialId={credentialId}
+          value={String(cfg.spreadsheetId ?? '')}
+          valuePath={String(cfg.spreadsheetPath ?? '')}
+          onChange={(id, path) => onChange({ spreadsheetId: id, spreadsheetPath: path, spreadsheetName: '', owner: '', searchFolderId: '' })}
+          label=""
+          placeholder="Browse and select a spreadsheet"
+          foldersOnly={false}
+          mimeTypeFilter="application/vnd.google-apps.spreadsheet"
+        />
+      ) : (
+        <div className="space-y-2 rounded-md border border-slate-200 dark:border-slate-700 p-2.5">
+          <ExpressionInput label="Spreadsheet name (contains)" value={String(cfg.spreadsheetName ?? '')}
+            onChange={(v) => onChange({ spreadsheetName: v, spreadsheetId: '' })}
+            placeholder="Budget 2025, Employee Data…"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Owner email (optional)" value={String(cfg.owner ?? '')}
+            onChange={(v) => onChange({ owner: v })}
+            placeholder="owner@example.com"
+            nodes={otherNodes} testResults={testResults} />
+          <GDriveFolderBrowser
+            credentialId={credentialId}
+            value={String(cfg.searchFolderId ?? '')}
+            valuePath={String(cfg.searchFolderPath ?? '')}
+            onChange={(id, path) => onChange({ searchFolderId: id, searchFolderPath: path })}
+            label="Search in folder (optional)"
+            placeholder="All of My Drive"
+          />
+          <div className="border-t border-slate-200 dark:border-slate-700 pt-2">
+            <ExpressionInput label="— or enter Spreadsheet ID directly —" value={String(cfg.spreadsheetId ?? '')}
+              onChange={(v) => onChange({ spreadsheetId: v, spreadsheetName: '', owner: '', searchFolderId: '' })}
+              placeholder="{{nodes.x.spreadsheetId}} or paste an ID"
+              nodes={otherNodes} testResults={testResults} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Value input option selector shared between write/append actions. */
+function GSheetsValueInputOption({ cfg, onChange }: { cfg: Record<string, unknown>; onChange: (p: Partial<Record<string, unknown>>) => void }) {
+  return (
+    <Select
+      label="Value input option"
+      value={String(cfg.valueInputOption ?? 'USER_ENTERED')}
+      onChange={(e) => onChange({ valueInputOption: e.target.value })}
+      options={[
+        { value: 'USER_ENTERED', label: 'User Entered — parses formulas & numbers' },
+        { value: 'RAW',          label: 'Raw — everything stored as plain text' },
+      ]}
+    />
+  );
+}
+
+/**
+ * Smart values + columnKeys input used by all write / append / upsert actions.
+ * - Accepts any shape: 2-D array, 1-D array, array of objects, single object,
+ *   or an expression like {{nodes.x.data}}.
+ * - Formula strings (e.g. =SUM(A1:B1)) are automatically evaluated by Google
+ *   Sheets when "User Entered" mode is selected.
+ * - columnKeys controls which object properties are extracted and in what column order.
+ */
+function GSheetsValuesInput({
+  cfg,
+  onChange,
+  label,
+  placeholder,
+  hint,
+  multiRow = false,
+  otherNodes,
+  testResults,
+}: {
+  cfg: Record<string, unknown>;
+  onChange: (p: Partial<Record<string, unknown>>) => void;
+  label: string;
+  placeholder: string;
+  hint?: string;
+  multiRow?: boolean;
+  otherNodes: ConfigProps['otherNodes'];
+  testResults: ConfigProps['testResults'];
+}) {
+  const valStr = typeof cfg.values === 'string'
+    ? cfg.values
+    : JSON.stringify(cfg.values ?? (multiRow ? [['value1', 'value2']] : ['value1', 'value2']), null, 2);
+
+  return (
+    <div className="space-y-2">
+      <ExpressionTextArea
+        label={label}
+        value={valStr}
+        onChange={(v) => onChange({ values: v })}
+        placeholder={placeholder}
+        nodes={otherNodes}
+        testResults={testResults}
+        rows={multiRow ? 4 : 3}
+        hint={hint}
+      />
+
+      {/* Column keys — shown collapsed by default */}
+      <div className="space-y-1">
+        <ExpressionInput
+          label="Column keys (optional — for object inputs)"
+          value={String(cfg.columnKeys ?? '')}
+          onChange={(v) => onChange({ columnKeys: v })}
+          placeholder="name, email, status"
+          nodes={otherNodes}
+          testResults={testResults}
+          hint="Comma-separated property names. When your values come from an object or array of objects, this controls which keys are extracted and in which column order. Example: name,email,status → columns A, B, C. Omit to use the object's own key order."
+        />
+      </div>
+
+      {/* Formula callout */}
+      <div className="flex gap-2 rounded-md border border-blue-200 dark:border-blue-800/40 bg-blue-50 dark:bg-blue-900/20 px-2.5 py-2">
+        <Info className="w-3.5 h-3.5 text-blue-400 flex-shrink-0 mt-0.5" />
+        <p className="text-[10px] text-blue-700 dark:text-blue-300 leading-relaxed">
+          <strong>Smart data handling:</strong> arrays, objects, or expressions are automatically converted.
+          Any cell value starting with <code className="font-mono bg-blue-100 dark:bg-blue-800/40 px-0.5 rounded">=</code> (e.g.{' '}
+          <code className="font-mono bg-blue-100 dark:bg-blue-800/40 px-0.5 rounded">=SUM(A1:B1)</code>) is
+          treated as a formula when <em>Value input</em> is set to "User Entered".
+          Nested objects or arrays within a cell are serialised to JSON.
+        </p>
+      </div>
+
+      <GSheetsValueInputOption cfg={cfg} onChange={onChange} />
+    </div>
+  );
+}
+
 function GSheetsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
-  const action = (cfg.action as string) ?? 'read';
+  const action       = (cfg.action as string) ?? 'read';
+  const credentialId = String(cfg.credentialId ?? '');
+
+  const needsSpreadsheet = action !== 'create_spreadsheet';
+
   return (
     <div className="space-y-3">
       <CredentialSelect
-        value={String(cfg.credentialId ?? '')}
+        value={credentialId}
         onChange={(id) => onChange({ credentialId: id })}
       />
       <Select
@@ -5804,40 +6367,385 @@ function GSheetsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) 
         value={action}
         onChange={(e) => onChange({ action: e.target.value })}
         options={[
-          { value: 'read',   label: 'Read Rows' },
-          { value: 'write',  label: 'Write / Update Rows' },
-          { value: 'append', label: 'Append Rows' },
+          { group: 'Read & Write', options: [
+            { value: 'read',   label: 'Read Rows' },
+            { value: 'write',  label: 'Write / Update Rows' },
+            { value: 'append', label: 'Append Rows (bulk)' },
+          ]},
+          { group: 'Spreadsheet (Document)', options: [
+            { value: 'create_spreadsheet', label: 'Create Spreadsheet' },
+            { value: 'delete_spreadsheet', label: 'Delete Spreadsheet' },
+          ]},
+          { group: 'Insert & Delete Rows / Columns', options: [
+            { value: 'insert_rows',         label: 'Insert Rows' },
+            { value: 'insert_columns',      label: 'Insert Columns' },
+            { value: 'delete_rows_columns', label: 'Delete Rows or Columns' },
+          ]},
+          { group: 'Row & Cell Data', options: [
+            { value: 'get_rows',           label: 'Get Row(s)' },
+            { value: 'append_row',         label: 'Append Row(s)' },
+            { value: 'append_to_row',      label: 'Append to Specific Row (horizontal)' },
+            { value: 'append_to_column',   label: 'Append to Specific Column (vertical)' },
+            { value: 'append_update_row',  label: 'Append or Update Row (Upsert)' },
+            { value: 'update_row',         label: 'Update Row' },
+          ]},
+          { group: 'Formatting & Structure', options: [
+            { value: 'format_cells',  label: 'Format Cells / Rows / Columns' },
+            { value: 'clear_sheet',   label: 'Clear Sheet' },
+            { value: 'create_sheet',  label: 'Create Sheet Tab' },
+            { value: 'delete_sheet',  label: 'Delete Sheet Tab' },
+          ]},
         ]}
       />
 
-      <ExpressionInput label="Spreadsheet ID" value={String(cfg.spreadsheetId ?? '')}
-        onChange={(v) => onChange({ spreadsheetId: v })} placeholder="Google Sheets spreadsheet ID"
-        nodes={otherNodes} testResults={testResults} />
+      {/* ── Spreadsheet picker (all actions except create_spreadsheet) ── */}
+      {needsSpreadsheet && (
+        <GSheetsSpreadsheetPicker cfg={cfg} onChange={onChange} otherNodes={otherNodes} testResults={testResults} />
+      )}
 
-      <ExpressionInput label="Range (A1 notation)" value={String(cfg.range ?? '')}
-        onChange={(v) => onChange({ range: v })} placeholder="Sheet1!A1:Z100"
-        nodes={otherNodes} testResults={testResults} />
-
-      {(action === 'write' || action === 'append') && (
+      {/* ── create_spreadsheet ──────────────────────────────────── */}
+      {action === 'create_spreadsheet' && (
         <>
-          <ExpressionTextArea
-            label="Values (2-D array or expression)"
-            value={typeof cfg.values === 'string' ? cfg.values : JSON.stringify(cfg.values ?? [['value1', 'value2']], null, 2)}
-            onChange={(v) => onChange({ values: v })}
-            placeholder={'[["col1","col2"],["val1","val2"]]'}
-            nodes={otherNodes}
-            testResults={testResults}
-            rows={4}
+          <ExpressionInput label="Spreadsheet title" value={String(cfg.title ?? '')}
+            onChange={(v) => onChange({ title: v })} placeholder="My Spreadsheet"
+            nodes={otherNodes} testResults={testResults} />
+          <GDriveFolderBrowser
+            credentialId={credentialId}
+            value={String(cfg.folderId ?? '')}
+            valuePath={String(cfg.folderPath ?? '')}
+            onChange={(id, path) => onChange({ folderId: id, folderPath: path })}
+            label="Save in folder (optional)"
+            placeholder="My Drive (root)"
           />
+        </>
+      )}
+
+      {/* ── delete_spreadsheet ──────────────────────────────────── */}
+      {action === 'delete_spreadsheet' && (
+        <div className="flex items-center gap-2">
+          <input type="checkbox" id="gsheets-perm" checked={!!cfg.permanent}
+            onChange={(e) => onChange({ permanent: e.target.checked })} className="w-3.5 h-3.5 rounded" />
+          <label htmlFor="gsheets-perm" className="text-xs text-slate-500 dark:text-slate-400">
+            Permanently delete (bypass trash)
+          </label>
+        </div>
+      )}
+
+      {/* ── read ────────────────────────────────────────────────── */}
+      {action === 'read' && (
+        <>
+          <ExpressionInput label="Range (A1 notation)" value={String(cfg.range ?? '')}
+            onChange={(v) => onChange({ range: v })} placeholder="Sheet1!A1:Z100 — or Sheet1!B:D for specific columns"
+            nodes={otherNodes} testResults={testResults} />
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="gsheets-hasHeaders" checked={cfg.hasHeaders !== false}
+              onChange={(e) => onChange({ hasHeaders: e.target.checked })} className="w-3.5 h-3.5 rounded" />
+            <label htmlFor="gsheets-hasHeaders" className="text-xs text-slate-500 dark:text-slate-400">
+              First row is headers (returns objects)
+            </label>
+          </div>
+          {cfg.hasHeaders !== false && (
+            <ExpressionInput label="Select columns (optional — comma-separated header names)"
+              value={String(cfg.selectColumns ?? '')}
+              onChange={(v) => onChange({ selectColumns: v })}
+              placeholder="name, email, status"
+              nodes={otherNodes} testResults={testResults}
+              hint="Only these columns will appear in the returned data objects. Leave blank to return all columns." />
+          )}
+        </>
+      )}
+
+      {/* ── write ───────────────────────────────────────────────── */}
+      {action === 'write' && (
+        <>
+          <ExpressionInput label="Range (A1 notation)" value={String(cfg.range ?? '')}
+            onChange={(v) => onChange({ range: v })} placeholder="Sheet1!A1:Z100"
+            nodes={otherNodes} testResults={testResults} />
+          <GSheetsValuesInput
+            cfg={cfg} onChange={onChange}
+            label="Values"
+            placeholder={'[["col1","col2"],["val1","val2"]] — or {{nodes.x.data}}'}
+            hint="Pass a 2-D array, an array of objects, or a single object. Each object becomes one row."
+            multiRow
+            otherNodes={otherNodes} testResults={testResults}
+          />
+        </>
+      )}
+
+      {/* ── append ──────────────────────────────────────────────── */}
+      {action === 'append' && (
+        <>
+          <ExpressionInput label="Range / Sheet name" value={String(cfg.range ?? '')}
+            onChange={(v) => onChange({ range: v })} placeholder="Sheet1"
+            nodes={otherNodes} testResults={testResults}
+            hint="Rows will be appended after the last row of data in this range." />
+          <GSheetsValuesInput
+            cfg={cfg} onChange={onChange}
+            label="Values"
+            placeholder={'[["row1col1","row1col2"],["row2col1","row2col2"]] — or {{nodes.x.data}}'}
+            hint="Pass a 2-D array, an array of objects, or a single object. Each object / sub-array becomes one new row."
+            multiRow
+            otherNodes={otherNodes} testResults={testResults}
+          />
+        </>
+      )}
+
+      {/* ── get_rows ────────────────────────────────────────────── */}
+      {action === 'get_rows' && (
+        <>
+          <ExpressionInput label="Sheet name" value={String(cfg.sheetName ?? '')}
+            onChange={(v) => onChange({ sheetName: v })} placeholder="Sheet1"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Range override (optional)" value={String(cfg.range ?? '')}
+            onChange={(v) => onChange({ range: v })} placeholder="Sheet1!A1:Z100 — or Sheet1!B:D for columns"
+            nodes={otherNodes} testResults={testResults} />
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="gsheets-getrows-headers" checked={cfg.hasHeaders !== false}
+              onChange={(e) => onChange({ hasHeaders: e.target.checked })} className="w-3.5 h-3.5 rounded" />
+            <label htmlFor="gsheets-getrows-headers" className="text-xs text-slate-500 dark:text-slate-400">
+              First row is headers (returns objects)
+            </label>
+          </div>
+          {cfg.hasHeaders !== false && (
+            <ExpressionInput label="Select columns (optional — comma-separated header names)"
+              value={String(cfg.selectColumns ?? '')}
+              onChange={(v) => onChange({ selectColumns: v })}
+              placeholder="name, email, status"
+              nodes={otherNodes} testResults={testResults}
+              hint="Only these columns are included in the output. Leave blank for all columns." />
+          )}
+          <ExpressionInput label="Filter column (optional)" value={String(cfg.filterColumn ?? '')}
+            onChange={(v) => onChange({ filterColumn: v })} placeholder="email or A"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Filter value (optional)" value={String(cfg.filterValue ?? '')}
+            onChange={(v) => onChange({ filterValue: v })} placeholder="john@example.com or {{nodes.x.email}}"
+            nodes={otherNodes} testResults={testResults} />
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Max results (0 = all)</label>
+            <input type="number" min={0}
+              value={Number(cfg.maxResults ?? 0)}
+              onChange={(e) => onChange({ maxResults: Number(e.target.value) })}
+              className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </div>
+        </>
+      )}
+
+      {/* ── append_row ──────────────────────────────────────────── */}
+      {action === 'append_row' && (
+        <>
+          <ExpressionInput label="Sheet name" value={String(cfg.sheetName ?? '')}
+            onChange={(v) => onChange({ sheetName: v })} placeholder="Sheet1"
+            nodes={otherNodes} testResults={testResults} />
+          <GSheetsValuesInput
+            cfg={cfg} onChange={onChange}
+            label="Row data"
+            placeholder={'["John", "Doe", "=A2&B2"] — or {{nodes.x.record}} — or {{nodes.x.records}}'}
+            hint="1-D array → one row. Object → one row from its values. Array of objects → each becomes a row. Formulas like =A1+B1 work when Value input is User Entered."
+            otherNodes={otherNodes} testResults={testResults}
+          />
+        </>
+      )}
+
+      {/* ── append_update_row (upsert) ───────────────────────────── */}
+      {action === 'append_update_row' && (
+        <>
+          <ExpressionInput label="Sheet name" value={String(cfg.sheetName ?? '')}
+            onChange={(v) => onChange({ sheetName: v })} placeholder="Sheet1"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Key column (header name or letter)" value={String(cfg.keyColumn ?? '')}
+            onChange={(v) => onChange({ keyColumn: v })} placeholder="email or A"
+            nodes={otherNodes} testResults={testResults}
+            hint="The column whose value is used to find an existing row. If a match is found the row is updated; otherwise the data is appended as a new row." />
+          <ExpressionInput label="Key value to match" value={String(cfg.keyValue ?? '')}
+            onChange={(v) => onChange({ keyValue: v })} placeholder="john@example.com or {{nodes.x.email}}"
+            nodes={otherNodes} testResults={testResults} />
+          <GSheetsValuesInput
+            cfg={cfg} onChange={onChange}
+            label="Row data"
+            placeholder={'["John", "Doe", "john@example.com"] — or {{nodes.x.record}}'}
+            hint="Pass a 1-D array, a single object (use Column keys to control order), or an expression. The first row of the resolved data is used for the upsert."
+            otherNodes={otherNodes} testResults={testResults}
+          />
+        </>
+      )}
+
+      {/* ── update_row ──────────────────────────────────────────── */}
+      {action === 'update_row' && (
+        <>
+          <ExpressionInput label="Range (A1 notation — e.g. Sheet1!A2)" value={String(cfg.range ?? '')}
+            onChange={(v) => onChange({ range: v })} placeholder="Sheet1!A2"
+            nodes={otherNodes} testResults={testResults} />
+          <GSheetsValuesInput
+            cfg={cfg} onChange={onChange}
+            label="Row data"
+            placeholder={'["John", "Doe", "john@example.com"] — or {{nodes.x.record}}'}
+            hint="Pass a 1-D array, a single object, or an expression. The row is written starting at the given range."
+            otherNodes={otherNodes} testResults={testResults}
+          />
+        </>
+      )}
+
+      {/* ── append_to_row (horizontal) ──────────────────────────── */}
+      {action === 'append_to_row' && (
+        <>
+          <ExpressionInput label="Sheet name" value={String(cfg.sheetName ?? '')}
+            onChange={(v) => onChange({ sheetName: v })} placeholder="Sheet1"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Row number (1-based)"
+            value={String(cfg.rowNumber ?? '1')}
+            onChange={(v) => onChange({ rowNumber: v })}
+            placeholder="1 or {{nodes.x.rowNum}}"
+            nodes={otherNodes} testResults={testResults}
+            hint="Which row to append to. Accepts a literal number or an expression." />
+          <GSheetsValuesInput
+            cfg={cfg} onChange={onChange}
+            label="Data to append (written after the last non-empty cell in that row)"
+            placeholder={'["Q4 Total", "=SUM(B2:E2)", "2025-01-01"] — or {{nodes.x.row}}'}
+            hint="1-D array or expression. Data is written horizontally starting at the first empty column in the specified row."
+            otherNodes={otherNodes} testResults={testResults}
+          />
+        </>
+      )}
+
+      {/* ── append_to_column (vertical) ─────────────────────────── */}
+      {action === 'append_to_column' && (
+        <>
+          <ExpressionInput label="Sheet name" value={String(cfg.sheetName ?? '')}
+            onChange={(v) => onChange({ sheetName: v })} placeholder="Sheet1"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Column letter" value={String(cfg.columnLetter ?? '')}
+            onChange={(v) => onChange({ columnLetter: v })} placeholder="A, B, C…"
+            nodes={otherNodes} testResults={testResults}
+            hint="The column where data will be appended below the last non-empty cell. E.g. B to append to column B." />
+          <GSheetsValuesInput
+            cfg={cfg} onChange={onChange}
+            label="Data to append (each item becomes a new row in this column)"
+            placeholder={'["Alice", "Bob", "Carol"] — or {{nodes.x.names}} — or {{nodes.x.records}}'}
+            hint="Each element of the array becomes one new cell going down. Accepts a 1-D array, an array of objects (first value of each), or an expression."
+            otherNodes={otherNodes} testResults={testResults}
+          />
+        </>
+      )}
+
+      {/* ── insert_rows ─────────────────────────────────────────── */}
+      {action === 'insert_rows' && (
+        <>
+          <ExpressionInput label="Sheet name" value={String(cfg.sheetName ?? '')}
+            onChange={(v) => onChange({ sheetName: v })} placeholder="Sheet1"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Number of rows to insert"
+            value={String(cfg.insertCount ?? '1')}
+            onChange={(v) => onChange({ insertCount: v })}
+            placeholder="1 or {{nodes.x.count}}"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Insert before row (0-based index)"
+            value={String(cfg.insertStartIndex ?? '0')}
+            onChange={(v) => onChange({ insertStartIndex: v })}
+            placeholder="0 or {{nodes.x.rowIndex}}"
+            nodes={otherNodes} testResults={testResults}
+            hint="0 = before the first row, 1 = before row 2, etc. Accepts a literal number or an expression." />
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="gsheets-inherit-rows" checked={!!cfg.inheritFromBefore}
+              onChange={(e) => onChange({ inheritFromBefore: e.target.checked })} className="w-3.5 h-3.5 rounded" />
+            <label htmlFor="gsheets-inherit-rows" className="text-xs text-slate-500 dark:text-slate-400">
+              Inherit formatting from the row above
+            </label>
+          </div>
+        </>
+      )}
+
+      {/* ── insert_columns ───────────────────────────────────────── */}
+      {action === 'insert_columns' && (
+        <>
+          <ExpressionInput label="Sheet name" value={String(cfg.sheetName ?? '')}
+            onChange={(v) => onChange({ sheetName: v })} placeholder="Sheet1"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Number of columns to insert"
+            value={String(cfg.insertCount ?? '1')}
+            onChange={(v) => onChange({ insertCount: v })}
+            placeholder="1 or {{nodes.x.count}}"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Insert before column (letter or 0-based index)"
+            value={String(cfg.columnLetter ?? String(cfg.insertStartIndex ?? '0'))}
+            onChange={(v) => onChange({ columnLetter: v, insertStartIndex: undefined })}
+            placeholder="A, B, C… or 0 or {{nodes.x.col}}"
+            nodes={otherNodes} testResults={testResults}
+            hint="Enter a column letter (A, B, C…), a 0-based index, or an expression. The new columns are inserted BEFORE this position." />
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="gsheets-inherit-cols" checked={!!cfg.inheritFromBefore}
+              onChange={(e) => onChange({ inheritFromBefore: e.target.checked })} className="w-3.5 h-3.5 rounded" />
+            <label htmlFor="gsheets-inherit-cols" className="text-xs text-slate-500 dark:text-slate-400">
+              Inherit formatting from the column to the left
+            </label>
+          </div>
+        </>
+      )}
+
+      {/* ── format_cells ─────────────────────────────────────────── */}
+      {action === 'format_cells' && (
+        <GSheetsFormatPanel cfg={cfg} onChange={onChange} otherNodes={otherNodes} testResults={testResults} />
+      )}
+
+      {/* ── clear_sheet ─────────────────────────────────────────── */}
+      {action === 'clear_sheet' && (
+        <>
+          <ExpressionInput label="Sheet name" value={String(cfg.sheetName ?? '')}
+            onChange={(v) => onChange({ sheetName: v })} placeholder="Sheet1"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput label="Range override (optional)" value={String(cfg.range ?? '')}
+            onChange={(v) => onChange({ range: v })} placeholder="Sheet1!A1:Z100 — leave blank to clear the whole sheet"
+            nodes={otherNodes} testResults={testResults} />
+        </>
+      )}
+
+      {/* ── create_sheet ────────────────────────────────────────── */}
+      {action === 'create_sheet' && (
+        <ExpressionInput label="New sheet tab title" value={String(cfg.newSheetTitle ?? '')}
+          onChange={(v) => onChange({ newSheetTitle: v })} placeholder="Summary"
+          nodes={otherNodes} testResults={testResults} />
+      )}
+
+      {/* ── delete_sheet ────────────────────────────────────────── */}
+      {action === 'delete_sheet' && (
+        <ExpressionInput label="Sheet tab name to delete" value={String(cfg.sheetName ?? '')}
+          onChange={(v) => onChange({ sheetName: v })} placeholder="OldData"
+          nodes={otherNodes} testResults={testResults} />
+      )}
+
+      {/* ── delete_rows_columns ─────────────────────────────────── */}
+      {action === 'delete_rows_columns' && (
+        <>
+          <ExpressionInput label="Sheet name" value={String(cfg.sheetName ?? '')}
+            onChange={(v) => onChange({ sheetName: v })} placeholder="Sheet1"
+            nodes={otherNodes} testResults={testResults} />
           <Select
-            label="Value input option"
-            value={String(cfg.valueInputOption ?? 'USER_ENTERED')}
-            onChange={(e) => onChange({ valueInputOption: e.target.value })}
+            label="Delete"
+            value={String(cfg.deleteType ?? 'rows')}
+            onChange={(e) => onChange({ deleteType: e.target.value })}
             options={[
-              { value: 'USER_ENTERED', label: 'User Entered (parse formulas)' },
-              { value: 'RAW', label: 'Raw (treat as plain text)' },
+              { value: 'rows',    label: 'Rows' },
+              { value: 'columns', label: 'Columns' },
             ]}
           />
+          <div className="flex gap-2">
+            <div className="flex-1 space-y-1">
+              <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Start index (0-based)</label>
+              <input type="number" min={0}
+                value={Number(cfg.startIndex ?? 0)}
+                onChange={(e) => onChange({ startIndex: Number(e.target.value) })}
+                className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            </div>
+            <div className="flex-1 space-y-1">
+              <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">End index (exclusive)</label>
+              <input type="number" min={1}
+                value={Number(cfg.endIndex ?? 1)}
+                onChange={(e) => onChange({ endIndex: Number(e.target.value) })}
+                className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            </div>
+          </div>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500">
+            Example: start 1, end 3 deletes 2 rows (rows 2 and 3 in the sheet, 0-indexed).
+          </p>
         </>
       )}
     </div>
