@@ -11,6 +11,7 @@ import { useSaveWorkflow } from '../../hooks/useSaveWorkflow';
 import { useGmailLabels, useGmailMessageLabels, isExpression } from '../../hooks/useGmailData';
 import { useGDriveItems } from '../../hooks/useGDriveData';
 import { useSlackChannels, useSlackUsers } from '../../hooks/useSlackData';
+import { stageFile } from '../../api/client';
 import { useTeamsTeams, useTeamsChannels, useTeamsUsers } from '../../hooks/useTeamsData';
 import { useBasecampProjects, useBasecampTodolists, useBasecampTodos, useBasecampTodoGroups, useBasecampPeople } from '../../hooks/useBasecampData';
 import { NodeIcon } from '../nodes/NodeIcons';
@@ -1745,50 +1746,172 @@ function GSheetsResultDisplay({ result }: { result: NodeTestResult }) {
   );
 }
 
+// ── Slack thread accordion ────────────────────────────────────────────────────
+
+type SlackMsgItem = {
+  ts?: string; formattedDate?: string; text?: string;
+  senderName?: string; hasFiles?: boolean; isParent?: boolean;
+  files?: Array<{ id?: unknown; name?: unknown; mimeType?: unknown; url?: unknown; isImage?: boolean }>;
+};
+
+function SlackThreadAccordion({ parent, replies }: { parent: SlackMsgItem; replies: SlackMsgItem[] }) {
+  const [open, setOpen] = useState(false);
+
+  const renderMsgBody = (m: SlackMsgItem, highlight = false) => (
+    <div className={`space-y-1 ${highlight ? 'bg-violet-50 dark:bg-violet-950/20' : 'bg-white dark:bg-slate-900/50'} px-3 py-2.5`}>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-[10px] font-bold text-violet-600 dark:text-violet-400">
+          {m.senderName ? `@${m.senderName}` : '(unknown sender)'}
+        </span>
+        {m.formattedDate && (
+          <span className="text-[9px] text-slate-400 dark:text-slate-500 font-mono whitespace-nowrap">{m.formattedDate}</span>
+        )}
+      </div>
+      <p className="text-xs text-slate-800 dark:text-slate-100 leading-snug break-words">
+        {m.text || <span className="italic text-slate-400">(no text)</span>}
+      </p>
+      {m.hasFiles && (
+        <span className="text-[9px] bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">📎 Attachment</span>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="rounded-lg border border-violet-200 dark:border-violet-800/50 overflow-hidden">
+      {renderMsgBody(parent, true)}
+
+      <button
+        type="button"
+        onClick={() => setOpen((p) => !p)}
+        className="w-full flex items-center gap-2 px-3 py-1.5 bg-violet-100/60 dark:bg-violet-900/20 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors text-left border-t border-violet-200 dark:border-violet-800/40"
+      >
+        {open
+          ? <ChevronUp   className="w-3 h-3 text-violet-500 dark:text-violet-400" />
+          : <ChevronDown className="w-3 h-3 text-violet-500 dark:text-violet-400" />}
+        <span className="text-[10px] font-semibold text-violet-700 dark:text-violet-300">
+          {replies.length} {replies.length === 1 ? 'reply' : 'replies'} in thread
+        </span>
+      </button>
+
+      {open && (
+        <div className="divide-y divide-slate-200 dark:divide-slate-700/50">
+          {replies.map((r, i) => (
+            <div key={i} className="relative pl-8">
+              {i < replies.length - 1 && (
+                <div className="absolute left-4 top-0 bottom-0 w-px bg-violet-200 dark:bg-violet-800/40" />
+              )}
+              <div className="absolute left-3 top-3 w-2 h-2 rounded-full bg-violet-300 dark:bg-violet-600 border-2 border-white dark:border-slate-900" />
+              {renderMsgBody(r)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Slack result ──────────────────────────────────────────────────────────────
 
 function SlackResultDisplay({ result }: { result: NodeTestResult }) {
   const out = (result.output ?? {}) as Record<string, unknown>;
 
-  // Read messages action
+  // ── Read Thread ────────────────────────────────────────────────────────────
+  // Detected by the presence of threadTs alongside a messages array
+  if (Array.isArray(out.messages) && out.threadTs !== undefined) {
+    const msgs    = out.messages as SlackMsgItem[];
+    const parent  = msgs.find((m) => m.isParent) ?? msgs[0];
+    const replies = msgs.filter((m) => !m.isParent);
+
+    return (
+      <div className="p-3 space-y-2">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Thread</span>
+          <span className="text-[9px] bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded-full font-semibold">
+            {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
+          </span>
+        </div>
+        {parent && <SlackThreadAccordion parent={parent} replies={replies} />}
+      </div>
+    );
+  }
+
+  // ── Read Messages ──────────────────────────────────────────────────────────
   if (Array.isArray(out.messages)) {
-    type SlackMsg = { ts?: string; text?: string; user?: string; replyCount?: number; threadTs?: string };
+    type SlackFile = { id?: unknown; name?: unknown; mimeType?: unknown; url?: unknown; isImage?: boolean };
+    type SlackMsg  = {
+      ts?: string; formattedDate?: string; text?: string;
+      senderName?: string; userId?: string;
+      replyCount?: number; threadTs?: string;
+      hasFiles?: boolean; files?: SlackFile[];
+    };
     const msgs      = out.messages as SlackMsg[];
     const hasThread = msgs.some((m) => (m.replyCount ?? 0) > 0);
 
     return (
       <div className="p-3 space-y-2">
-        {/* Hint when threads are present */}
         {hasThread && (
           <div className="flex items-center gap-2 rounded-md bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/50 px-3 py-2">
             <Info className="w-3 h-3 text-indigo-500 dark:text-indigo-400 shrink-0" />
             <p className="text-[10px] text-indigo-700 dark:text-indigo-300 font-medium">
-              Some messages have thread replies — shown as a badge. Replies live in separate threads and are not fetched here.
+              Some messages have thread replies. Use the <strong>Read Thread</strong> action with the message&apos;s <code className="font-mono bg-indigo-100 dark:bg-indigo-800/50 px-0.5 rounded">ts</code> to view replies.
             </p>
           </div>
         )}
         <ExpandableList
           items={msgs}
-          countLabel={(n) => `${n} message${n !== 1 ? 's' : ''} retrieved`}
-          initialShow={5}
+          countLabel={(n) => `${n} message${n !== 1 ? 's' : ''} · oldest → newest`}
+          initialShow={10}
           emptyText="No messages found"
           renderItem={(m) => (
             <div className="bg-slate-100 dark:bg-slate-800 rounded-md px-3 py-2.5 space-y-1">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 min-w-0">
-                  {m.user && (
-                    <p className="text-[10px] font-semibold text-slate-600 dark:text-slate-300 mb-0.5">@{m.user}</p>
-                  )}
-                  <p className="text-xs text-slate-800 dark:text-slate-100 leading-snug break-words">{m.text || '(no text)'}</p>
-                </div>
-                {(m.replyCount ?? 0) > 0 && (
-                  <span className="inline-flex items-center shrink-0 gap-1 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-[9px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap border border-indigo-200 dark:border-indigo-700/50">
-                    🧵 {m.replyCount} {m.replyCount === 1 ? 'reply' : 'replies'}
+              {/* Header row: sender + timestamp */}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-[10px] font-bold text-violet-600 dark:text-violet-400">
+                  {m.senderName ? `@${m.senderName}` : '(unknown sender)'}
+                </span>
+                {m.formattedDate && (
+                  <span className="text-[9px] text-slate-400 dark:text-slate-500 font-mono whitespace-nowrap">
+                    {m.formattedDate}
                   </span>
                 )}
               </div>
-              {m.ts && (
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{m.ts}</p>
+              {/* Message body */}
+              <p className="text-xs text-slate-800 dark:text-slate-100 leading-snug break-words">
+                {m.text || <span className="italic text-slate-400">(no text)</span>}
+              </p>
+              {/* File / attachment indicator */}
+              {m.hasFiles && (
+                <div className="space-y-1 pt-0.5">
+                  {(m.files ?? []).length > 0 ? (
+                    (m.files!).map((f, fi) => (
+                      <div key={fi} className="flex items-center gap-1.5">
+                        {f.isImage ? (
+                          <span className="text-[9px] bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded font-semibold">🖼 Image</span>
+                        ) : (
+                          <span className="text-[9px] bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded font-semibold">📎 File</span>
+                        )}
+                        {f.name && <span className="text-[9px] text-slate-500 dark:text-slate-400 truncate">{String(f.name)}</span>}
+                        {f.url && (
+                          <a href={String(f.url)} target="_blank" rel="noopener noreferrer"
+                            className="text-[9px] text-blue-500 hover:underline truncate ml-auto">
+                            View
+                          </a>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <span className="text-[9px] bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">📎 Attachment</span>
+                  )}
+                </div>
+              )}
+              {/* Thread badge */}
+              {(m.replyCount ?? 0) > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="inline-flex items-center gap-1 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-[9px] font-bold px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-700/50">
+                    🧵 {m.replyCount} {m.replyCount === 1 ? 'reply' : 'replies'}
+                  </span>
+                  <span className="text-[9px] text-slate-400 dark:text-slate-500 italic">— use Read Thread to view</span>
+                </div>
               )}
             </div>
           )}
@@ -1797,17 +1920,92 @@ function SlackResultDisplay({ result }: { result: NodeTestResult }) {
     );
   }
 
-  // File upload action
-  if (out.fileId !== undefined) {
+  // ── List Users ─────────────────────────────────────────────────────────────
+  if (Array.isArray(out.users)) {
+    type SlackUser = { id: string; displayName?: string; realName?: string; name?: string; email?: string; isBot?: boolean };
+    const users = out.users as SlackUser[];
     return (
       <div className="p-3 space-y-2">
-        <SuccessBanner text={`File uploaded: ${out.filename ?? 'file'}`} />
-        <InfoRow label="File ID" value={String(out.fileId ?? '')} mono />
+        <ExpandableList
+          items={users}
+          countLabel={(n) => `${n} user${n !== 1 ? 's' : ''}`}
+          initialShow={10}
+          emptyText="No users found"
+          renderItem={(u) => (
+            <div className="bg-slate-100 dark:bg-slate-800 rounded-md px-2.5 py-1.5 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
+                  {u.displayName || u.realName || u.name}
+                  {u.isBot && <span className="ml-1 text-[9px] bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-1 rounded">bot</span>}
+                </p>
+                {u.email && <p className="text-[9px] text-slate-400 dark:text-slate-500 truncate">{u.email}</p>}
+              </div>
+              <span className="text-[9px] font-mono text-slate-400 dark:text-slate-500 shrink-0">{u.id}</span>
+            </div>
+          )}
+        />
       </div>
     );
   }
 
-  // Send message / DM
+  // ── List Channels ──────────────────────────────────────────────────────────
+  if (Array.isArray(out.channels)) {
+    type SlackChannel = { id: string; name: string; isPrivate?: boolean; isMember?: boolean; memberCount?: number };
+    const channels = out.channels as SlackChannel[];
+    return (
+      <div className="p-3 space-y-2">
+        <ExpandableList
+          items={channels}
+          countLabel={(n) => `${n} channel${n !== 1 ? 's' : ''}`}
+          initialShow={10}
+          emptyText="No channels found"
+          renderItem={(c) => (
+            <div className="bg-slate-100 dark:bg-slate-800 rounded-md px-2.5 py-1.5 flex items-center gap-2">
+              <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0">{c.isPrivate ? '🔒' : '#'}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{c.name}</p>
+                <p className="text-[9px] text-slate-400 dark:text-slate-500">{c.id}{c.memberCount != null ? ` · ${c.memberCount} members` : ''}</p>
+              </div>
+              {c.isMember && (
+                <span className="text-[9px] bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded shrink-0">joined</span>
+              )}
+            </div>
+          )}
+        />
+      </div>
+    );
+  }
+
+  // ── File Upload ────────────────────────────────────────────────────────────
+  if (out.fileId !== undefined) {
+    return (
+      <div className="p-3 space-y-2">
+        <SuccessBanner text={`File uploaded: ${out.filename ?? 'file'}`} />
+        <InfoRow label="File ID"  value={String(out.fileId  ?? '')} mono />
+        {out.mimeType && <InfoRow label="MIME type" value={String(out.mimeType)} />}
+      </div>
+    );
+  }
+
+  // ── Send Message / DM (single) ─────────────────────────────────────────────
+  if (out.results !== undefined) {
+    // Multi-recipient result
+    type MultiResult = { ok?: boolean; channel?: string; ts?: string; userId?: string };
+    const results = out.results as MultiResult[];
+    return (
+      <div className="p-3 space-y-2">
+        <SuccessBanner text={`Sent to ${results.length} recipient${results.length !== 1 ? 's' : ''}`} />
+        {results.map((r, i) => (
+          <div key={i} className="bg-slate-100 dark:bg-slate-800 rounded-md px-2.5 py-1.5 space-y-0.5 text-[10px]">
+            {r.channel && <InfoRow label="Channel" value={String(r.channel)} />}
+            {r.userId  && <InfoRow label="User"    value={String(r.userId)}  />}
+            {r.ts      && <InfoRow label="ts"      value={String(r.ts)} mono />}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="p-3 space-y-2">
       <SuccessBanner text="Message sent to Slack" />
@@ -1892,7 +2090,21 @@ function TeamsThreadAccordion({ message, replies }: { message: TeamsMsgItem; rep
 function TeamsResultDisplay({ result }: { result: NodeTestResult }) {
   const out = (result.output ?? {}) as Record<string, unknown>;
 
-  // Read messages action
+  // ── Read Thread action ─────────────────────────────────────────────────────
+  if (out.parent !== undefined && !Array.isArray(out.messages)) {
+    const parent  = out.parent  as TeamsMsgItem;
+    const replies = (out.replies as TeamsMsgItem[]) ?? [];
+    return (
+      <div className="p-3 space-y-2">
+        <SectionLabel>
+          Thread · {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
+        </SectionLabel>
+        <TeamsThreadAccordion message={parent} replies={replies} />
+      </div>
+    );
+  }
+
+  // ── Read messages action ───────────────────────────────────────────────────
   if (Array.isArray(out.messages)) {
     const msgs     = out.messages as TeamsMsgItem[];
     const topLevel = msgs.filter((m) => !m.replyToId);
@@ -2297,23 +2509,26 @@ function NodeTestPanel({
   workflowId,
   nodeType,
   savedResult,
+  onBeforeRun,
 }: {
   nodeId: string;
   workflowId: string;
   nodeType: string;
   savedResult: NodeTestResult | null;
+  /** Commits the panel draft to the workflow store and saves before running the test. */
+  onBeforeRun: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [localResult, setLocalResult] = useState<NodeTestResult | null>(null);
   const testNode = useTestNode();
-  const { save: saveWorkflow } = useSaveWorkflow();
 
   const displayResult = localResult ?? savedResult;
 
   async function handleRun() {
-    // Always persist the latest in-memory config before executing so the
-    // backend runs with exactly what the user currently sees in the panel.
-    await saveWorkflow();
+    // Commit the panel's draft config (including staged file IDs, etc.) to the
+    // workflow store and persist to the backend BEFORE running the test, so the
+    // backend always sees the latest values from the config panel.
+    await onBeforeRun();
     const result = await testNode.mutateAsync({ workflowId, nodeId });
     setLocalResult(result);
   }
@@ -2499,6 +2714,10 @@ export function NodeConfigPanel() {
 
   // ── Local draft — buffers config changes until the user explicitly saves ─────
   const [draft, setDraft] = useState<NodeDraft | null>(null);
+  // Always-current ref so async callbacks (commitDraftToStore, commitAndSave)
+  // never read a stale closed-over draft value.
+  const draftRef = useRef<NodeDraft | null>(null);
+  useEffect(() => { draftRef.current = draft; }, [draft]);
   // originalSnapshot is a STATE (not a ref) so updating it after save
   // triggers a re-render and isDirtyLocal correctly recomputes to false.
   const [originalSnapshot, setOriginalSnapshot] = useState<NodeDraft | null>(null);
@@ -2630,29 +2849,46 @@ export function NodeConfigPanel() {
     }
   }
 
-  async function handleNodeSave() {
-    if (!draft) return;
-    setIsSavingNode(true);
-
-    // Commit draft values into the global store
-    setNodes(nodes.map((n) =>
+  /** Commit current draft values into the workflow store (no save dialog / success state).
+   *  Reads from draftRef (always up-to-date) and directly from the Zustand store for
+   *  nodes, so this function is safe to call from async contexts that might close over
+   *  a stale React render. */
+  function commitDraftToStore() {
+    const currentDraft = draftRef.current;
+    if (!currentDraft) return;
+    // Read the latest nodes directly from the store to avoid stale React hook closure
+    const latestNodes = useWorkflowStore.getState().nodes;
+    setNodes(latestNodes.map((n) =>
       n.id === selectedNodeId
         ? {
             ...n,
             data: {
               ...n.data,
-              label: draft.label,
-              config: draft.config,
-              retries: draft.retries ?? 0,
-              retryDelayMs: draft.retryDelayMs ?? 0,
-              timeoutMs: draft.timeoutMs,
+              label:        currentDraft.label,
+              config:       currentDraft.config,
+              retries:      currentDraft.retries ?? 0,
+              retryDelayMs: currentDraft.retryDelayMs ?? 0,
+              timeoutMs:    currentDraft.timeoutMs,
             },
           }
         : n
     ));
+  }
+
+  /** Commit draft to store, then persist to the backend. Used by the test panel. */
+  async function commitAndSave() {
+    commitDraftToStore();
+    await saveWorkflow();
+  }
+
+  async function handleNodeSave() {
+    const currentDraft = draftRef.current;
+    if (!currentDraft) return;
+    setIsSavingNode(true);
+    commitDraftToStore();
     try {
       await saveWorkflow();
-      setOriginalSnapshot({ ...draft, config: { ...draft.config } });
+      setOriginalSnapshot({ ...currentDraft, config: { ...currentDraft.config } });
       setSaveSuccess(true);
       setIsSavingNode(false);
       setTimeout(() => setSaveSuccess(false), 2500);
@@ -2778,6 +3014,7 @@ export function NodeConfigPanel() {
           workflowId={activeWorkflow!.id}
           nodeType={nodeType}
           savedResult={savedTestResult}
+          onBeforeRun={commitAndSave}
         />
       )}
 
@@ -5686,8 +5923,7 @@ function SlackCredentialSelect({
 }
 
 // ── SlackResourceSelect ────────────────────────────────────────────────────────
-// Smart picker: shows a searchable list when a credential is selected,
-// with a toggle to switch to free-form expression input.
+// Single-value smart picker with searchable list + expression toggle.
 
 function SlackResourceSelect({
   label,
@@ -5719,9 +5955,7 @@ function SlackResourceSelect({
   const [filter, setFilter] = useState('');
 
   useEffect(() => {
-    // Fall back to expression mode when credential is cleared
     if (!hasCredential) { setExpressionMode(true); return; }
-    // Auto-switch to picker mode once items have loaded and value isn't an expression
     if (hasCredential && items.length > 0 && !value.includes('{{')) {
       setExpressionMode(false);
     }
@@ -5738,23 +5972,14 @@ function SlackResourceSelect({
         <div className="flex items-center justify-between">
           <span className="block text-xs font-medium text-slate-500 dark:text-slate-400">{label}</span>
           {hasCredential && (
-            <button
-              type="button"
-              onClick={() => setExpressionMode(false)}
-              className="text-[10px] text-violet-400 hover:text-violet-300 transition-colors"
-            >
+            <button type="button" onClick={() => setExpressionMode(false)}
+              className="text-[10px] text-violet-400 hover:text-violet-300 transition-colors">
               Pick from list
             </button>
           )}
         </div>
-        <ExpressionInput
-          label=""
-          value={value}
-          onChange={onChange}
-          placeholder={placeholder}
-          nodes={otherNodes}
-          testResults={testResults}
-        />
+        <ExpressionInput label="" value={value} onChange={onChange} placeholder={placeholder}
+          nodes={otherNodes} testResults={testResults} />
       </div>
     );
   }
@@ -5763,58 +5988,43 @@ function SlackResourceSelect({
     <div className="space-y-1">
       <div className="flex items-center justify-between">
         <span className="block text-xs font-medium text-slate-500 dark:text-slate-400">{label}</span>
-        <button
-          type="button"
-          onClick={() => setExpressionMode(true)}
-          className="text-[10px] text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
-        >
+        <button type="button" onClick={() => setExpressionMode(true)}
+          className="text-[10px] text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors">
           Use expression
         </button>
       </div>
-
       {isLoading && (
         <div className="flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-slate-500 py-1">
           <Loader2 className="w-3 h-3 animate-spin" /> Loading…
         </div>
       )}
-
       {isError && (
         <p className="text-[10px] text-red-400">
-          Failed to load. <button type="button" className="underline" onClick={() => setExpressionMode(true)}>Enter manually.</button>
+          Failed to load.{' '}
+          <button type="button" className="underline" onClick={() => setExpressionMode(true)}>Enter manually.</button>
         </p>
       )}
-
       {!isLoading && !isError && (
         <div className="space-y-1">
-          {/* Search box */}
-          <input
-            type="text"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
+          <input type="text" value={filter} onChange={(e) => setFilter(e.target.value)}
             placeholder="Search…"
-            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500 placeholder-slate-500"
-          />
-          {/* Scrollable list */}
+            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500 placeholder-slate-500" />
           <div className="max-h-36 overflow-y-auto rounded-md border border-slate-600 bg-slate-100 dark:bg-slate-800 divide-y divide-slate-700">
             {filtered.length === 0 && (
               <p className="text-[10px] text-slate-400 dark:text-slate-500 px-2.5 py-2">No results.</p>
             )}
             {filtered.map((item) => (
-              <button
-                key={item.id}
-                type="button"
+              <button key={item.id} type="button"
                 onClick={() => { onChange(item.id); setFilter(''); }}
                 className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors ${
                   item.id === value
                     ? 'bg-violet-600/30 text-violet-300'
                     : 'text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                }`}
-              >
+                }`}>
                 {renderItem(item)}
               </button>
             ))}
           </div>
-          {/* Selected value badge */}
           {selected && (
             <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
               Selected: <span className="text-slate-700 dark:text-slate-300">{renderItem(selected)}</span>
@@ -5827,22 +6037,388 @@ function SlackResourceSelect({
   );
 }
 
+// ── SlackMultiPicker ───────────────────────────────────────────────────────────
+// Multi-select tag input backed by the Slack channels/users list.
+// Stores value as a comma-separated string of IDs.
+
+function SlackMultiPicker({
+  label,
+  value,
+  onChange,
+  items,
+  isLoading,
+  isError,
+  placeholder,
+  renderItem,
+  renderTag,
+  hasCredential,
+  otherNodes,
+  testResults,
+}: {
+  label: string;
+  value: string;         // comma-separated IDs
+  onChange: (v: string) => void;
+  items: { id: string; display: string }[];
+  isLoading: boolean;
+  isError: boolean;
+  placeholder: string;
+  renderItem: (item: { id: string; display: string }) => string;
+  renderTag:  (item: { id: string; display: string } | undefined, raw: string) => string;
+  hasCredential: boolean;
+  otherNodes: ConfigProps['otherNodes'];
+  testResults: ConfigProps['testResults'];
+}) {
+  const selected: string[] = value ? value.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  const [filter, setFilter] = useState('');
+  const [expressionMode, setExpressionMode] = useState(!hasCredential || value.includes('{{'));
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [expressionInput, setExpressionInput] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!hasCredential) { setExpressionMode(true); return; }
+    if (hasCredential && items.length > 0 && !value.includes('{{')) {
+      setExpressionMode(false);
+    }
+  }, [hasCredential, items.length, value]);
+
+  function addId(id: string) {
+    if (!selected.includes(id)) onChange([...selected, id].join(','));
+    setFilter('');
+  }
+
+  function removeId(id: string) {
+    onChange(selected.filter((s) => s !== id).join(','));
+  }
+
+  function commitExpression(raw: string) {
+    const trimmed = raw.trim().replace(/,\s*$/, '');
+    if (trimmed && !selected.includes(trimmed)) {
+      onChange([...selected, trimmed].join(','));
+    }
+    setExpressionInput('');
+  }
+
+  function handleInsert(expr: string) {
+    setExpressionInput((prev) => prev + expr);
+    setPickerOpen(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  const filtered = items.filter(
+    (i) => i.display.toLowerCase().includes(filter.toLowerCase()) && !selected.includes(i.id)
+  );
+
+  if (!hasCredential || expressionMode) {
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-1">
+          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">{label}</label>
+          <div className="flex items-center gap-2">
+            {hasCredential && (
+              <button type="button" onClick={() => { setExpressionMode(false); }}
+                className="text-[10px] text-violet-400 hover:text-violet-300 transition-colors">
+                Pick from list
+              </button>
+            )}
+            {otherNodes.length > 0 && (
+              <button type="button" onClick={() => setPickerOpen((p) => !p)}
+                title="Insert variable"
+                className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded transition-colors shrink-0 ${
+                  pickerOpen ? 'bg-blue-600 text-white' : 'text-blue-500 dark:text-blue-400 hover:text-gray-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700'
+                }`}>
+                <Braces className="w-2.5 h-2.5" />Insert variable
+              </button>
+            )}
+          </div>
+        </div>
+        {/* Tag display + input for expression mode */}
+        <div className="flex flex-wrap gap-1 min-h-[30px] bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md px-2 py-1.5 focus-within:ring-1 focus-within:ring-violet-500 cursor-text"
+          onClick={() => inputRef.current?.focus()}>
+          {selected.map((id, i) => {
+            const item = items.find((it) => it.id === id);
+            return (
+              <span key={i} className="inline-flex items-center gap-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[10px] rounded px-1.5 py-0.5 max-w-full">
+                <span className="break-all">{renderTag(item, id)}</span>
+                <button type="button" onClick={(e) => { e.stopPropagation(); removeId(id); }}
+                  className="ml-0.5 text-violet-400 hover:text-red-500 leading-none flex-shrink-0">×</button>
+              </span>
+            );
+          })}
+          <input ref={inputRef} type="text" value={expressionInput}
+            onChange={(e) => setExpressionInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ',' || e.key === 'Tab') { e.preventDefault(); commitExpression(expressionInput); }
+              else if (e.key === 'Backspace' && expressionInput === '' && selected.length > 0) removeId(selected[selected.length - 1]);
+            }}
+            onBlur={() => { if (expressionInput.trim()) commitExpression(expressionInput); }}
+            placeholder={selected.length === 0 ? placeholder : ''}
+            className="flex-1 min-w-[120px] bg-transparent text-xs text-gray-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 outline-none py-0.5" />
+        </div>
+        <p className="text-[10px] text-slate-400 dark:text-slate-500">Press Enter or comma to add each ID / expression</p>
+        {pickerOpen && <VariablePickerPanel nodes={otherNodes} testResults={testResults} onInsert={handleInsert} />}
+      </div>
+    );
+  }
+
+  // Picker mode — show searchable list + selected tags
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">{label}</label>
+        <button type="button" onClick={() => setExpressionMode(true)}
+          className="text-[10px] text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors">
+          Use expression
+        </button>
+      </div>
+
+      {/* Selected tags */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {selected.map((id, i) => {
+            const item = items.find((it) => it.id === id);
+            return (
+              <span key={i} className="inline-flex items-center gap-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[10px] rounded px-1.5 py-0.5">
+                <span>{renderTag(item, id)}</span>
+                <button type="button" onClick={() => removeId(id)}
+                  className="ml-0.5 text-violet-400 hover:text-red-500 leading-none">×</button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {isLoading && (
+        <div className="flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-slate-500 py-1">
+          <Loader2 className="w-3 h-3 animate-spin" /> Loading…
+        </div>
+      )}
+      {isError && (
+        <p className="text-[10px] text-red-400">
+          Failed to load.{' '}
+          <button type="button" className="underline" onClick={() => setExpressionMode(true)}>Enter manually.</button>
+        </p>
+      )}
+      {!isLoading && !isError && (
+        <div className="space-y-1">
+          <input type="text" value={filter} onChange={(e) => setFilter(e.target.value)}
+            placeholder="Search to add…"
+            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500 placeholder-slate-500" />
+          <div className="max-h-36 overflow-y-auto rounded-md border border-slate-600 bg-slate-100 dark:bg-slate-800 divide-y divide-slate-700">
+            {filtered.length === 0 && (
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 px-2.5 py-2">
+                {items.length === 0 ? 'No items available.' : 'All items selected or no results.'}
+              </p>
+            )}
+            {filtered.map((item) => (
+              <button key={item.id} type="button" onClick={() => addId(item.id)}
+                className="w-full text-left px-2.5 py-1.5 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+                {renderItem(item)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── SlackUploadInput ───────────────────────────────────────────────────────────
+// File upload input with three source modes:
+//   content — plain text / expression
+//   local   — pick a file from the user's device (staged server-side, never stored in workflow JSON)
+//   node    — reference another node's file output via expression
+
+function SlackUploadInput({ cfg, onChange, otherNodes, testResults }: {
+  cfg: Record<string, unknown>;
+  onChange: (p: Partial<Record<string, unknown>>) => void;
+  otherNodes: CanvasNode[];
+  testResults: Record<string, NodeTestResult>;
+}) {
+  const source = (cfg.uploadSource as string | undefined) ?? 'content';
+  const [staging, setStaging] = useState(false);
+  const [stagingError, setStagingError] = useState<string | null>(null);
+
+  function readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload  = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleFileChange(file: File, inputEl: HTMLInputElement) {
+    // Reset the input value immediately so the user can re-pick the same
+    // file name in a future interaction — without this the browser's change
+    // event won't fire if the identical path is selected again.
+    inputEl.value = '';
+
+    setStagingError(null);
+    // Clear any stale staging metadata so the UI shows a clean loading state
+    onChange({
+      stagedFileId:  undefined,
+      _stagedSize:   undefined,
+      _stagedName:   undefined,
+      _stagedExpiry: undefined,
+    });
+    setStaging(true);
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const staged  = await stageFile({
+        filename: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        data:     dataUrl,
+      });
+      // Store only the lightweight reference — no raw bytes in the workflow config.
+      // Also update `filename` so the Slack API always sends the correct file name
+      // (the "Filename" field in the UI is pre-filled but user can override it).
+      onChange({
+        uploadSource:   'staged',
+        stagedFileId:   staged.stagedFileId,
+        filename:       staged.filename,   // keep filename in sync with staged file
+        uploadMimeType: staged.mimeType,
+        _stagedSize:    staged.size,
+        _stagedName:    staged.filename,
+        _stagedExpiry:  staged.expiresAt,
+      });
+    } catch (err) {
+      setStagingError(err instanceof Error ? err.message : 'Upload failed. Please try again.');
+    } finally {
+      setStaging(false);
+    }
+  }
+
+  const isStaged    = source === 'staged' && !!cfg.stagedFileId;
+  const displayMode = isStaged ? 'local' : source; // treat staged as local in UI
+
+  return (
+    <div className="space-y-3">
+      {/* Source selector */}
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">File source</label>
+        <div className="flex gap-3 flex-wrap">
+          {([
+            ['content', 'Text / expression'],
+            ['local',   'Upload from device'],
+            ['node',    'From another node'],
+          ] as const).map(([val, lbl]) => (
+            <label key={val} className="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" name="slack-upload-source" value={val}
+                checked={displayMode === val}
+                onChange={() => onChange({ uploadSource: val, stagedFileId: undefined, _stagedSize: undefined, _stagedName: undefined, _stagedExpiry: undefined })}
+                className="w-3 h-3 accent-violet-500" />
+              <span className="text-xs text-slate-600 dark:text-slate-300">{lbl}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Text / expression ──────────────────────────────────────── */}
+      {displayMode === 'content' && (
+        <ExpressionTextArea
+          label="File content"
+          value={String(cfg.fileContent ?? '')}
+          onChange={(v) => onChange({ fileContent: v })}
+          placeholder="File contents or {{nodes.x.text}}"
+          nodes={otherNodes}
+          testResults={testResults}
+          rows={4}
+        />
+      )}
+
+      {/* ── Upload from device ────────────────────────────────────── */}
+      {displayMode === 'local' && (
+        <div className="space-y-1.5">
+          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">File</label>
+
+          {/* Drop zone / file picker */}
+          <label className={`flex flex-col gap-1 cursor-pointer group ${staging ? 'pointer-events-none' : ''}`}>
+            <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded border text-xs transition-colors ${
+              staging
+                ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300'
+                : isStaged
+                  ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
+                  : 'border-dashed border-slate-300 dark:border-slate-600 text-slate-400 dark:text-slate-500 group-hover:border-violet-400 dark:group-hover:border-violet-500'
+            }`}>
+              {staging ? (
+                <><Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" /><span>Uploading file…</span></>
+              ) : isStaged ? (
+                <><CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" /><span className="truncate">{String(cfg._stagedName || cfg.filename || 'File ready')}</span></>
+              ) : (
+                <span>Click to choose a file…</span>
+              )}
+            </div>
+            <input type="file" className="sr-only" disabled={staging}
+              onChange={(e) => { if (e.target.files?.[0]) handleFileChange(e.target.files[0], e.target); }} />
+          </label>
+
+          {/* Staged file details */}
+          {isStaged && (
+            <p className="text-[9px] text-slate-400 dark:text-slate-500 leading-snug">
+              {String(cfg._stagedName)} · {String(cfg.uploadMimeType || 'auto-detected')}
+              {cfg._stagedSize ? ` · ${(Number(cfg._stagedSize) / 1024 / 1024).toFixed(1)} MB` : ''}
+              {' · '}<span className="text-amber-500 dark:text-amber-400">expires {new Date(String(cfg._stagedExpiry)).toLocaleString()}</span>
+            </p>
+          )}
+
+          {/* Staging error */}
+          {stagingError && (
+            <p className="text-[10px] text-red-500 dark:text-red-400 flex items-center gap-1">
+              <AlertCircle className="w-3 h-3 shrink-0" />{stagingError}
+            </p>
+          )}
+
+          {/* Re-attach hint for expired staged files */}
+          {!isStaged && !staging && (
+            <p className="text-[9px] text-slate-400 dark:text-slate-500">
+              The file is uploaded immediately and stored temporarily (24 h). Re-attach if you need to re-run after expiry.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* ── From another node ─────────────────────────────────────── */}
+      {displayMode === 'node' && (
+        <>
+          <ExpressionInput
+            label="File data (base64 or data-URL)"
+            value={String(cfg.uploadData ?? '')}
+            onChange={(v) => onChange({ uploadData: v })}
+            placeholder="{{nodes.gdrive.data}} or {{nodes.x.base64}}"
+            nodes={otherNodes}
+            testResults={testResults}
+            hint="Use an expression that resolves to a base64 string or data-URL from e.g. a Google Drive node."
+          />
+          <ExpressionInput
+            label="MIME type (optional)"
+            value={String(cfg.uploadMimeType ?? '')}
+            onChange={(v) => onChange({ uploadMimeType: v })}
+            placeholder="application/pdf"
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── SlackConfig ────────────────────────────────────────────────────────────────
 
 function SlackConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
-  const action      = (cfg.action as string) ?? 'send_message';
+  const action       = (cfg.action as string) ?? 'send_message';
   const credentialId = String(cfg.credentialId ?? '');
 
   const {
     channels, missingScopes,
     isLoading: loadingChannels, isError: errorChannels,
   } = useSlackChannels(credentialId);
-  const { data: users = [],    isLoading: loadingUsers,    isError: errorUsers }    =
+  const { data: users = [], isLoading: loadingUsers, isError: errorUsers } =
     useSlackUsers(credentialId);
 
   const channelItems = channels.map((c) => ({
     id:      c.id!,
-    // prefix: private channels get 🔒, non-member public channels get "(not joined)"
     display: c.isPrivate
       ? `🔒 ${c.name}`
       : c.isMember
@@ -5854,6 +6430,12 @@ function SlackConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
     display: u.displayName || u.realName || u.name,
   }));
 
+  // Helpers: parse the comma-string fields for multi-pickers
+  const channelsValue = String(cfg.channels ?? cfg.channel ?? '');
+  const userIdsValue  = String(cfg.userIds  ?? cfg.userId  ?? '');
+  const readSource    = (cfg.readSource as string | undefined) ?? 'channel';
+  const channelFilter = (cfg.channelFilter as string | undefined) ?? 'all';
+
   return (
     <div className="space-y-3">
       <SlackCredentialSelect
@@ -5861,17 +6443,15 @@ function SlackConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
         onChange={(id) => onChange({ credentialId: id })}
       />
 
-      {/* Reconnect hint when the stored token is missing required scopes */}
       {credentialId && missingScopes.length > 0 && (
         <div className="flex items-start gap-2 rounded-md border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-2.5 py-2">
           <AlertCircle className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
           <p className="text-[10px] text-amber-700 dark:text-amber-300 leading-relaxed">
-            Private channels are hidden because your token is missing{' '}
+            Private channels are hidden — token is missing{' '}
             <code className="font-mono bg-amber-100 dark:bg-amber-500/20 px-0.5 rounded">
               {missingScopes.join(', ')}
             </code>
-            . Add it in your Slack app under <strong>OAuth &amp; Permissions → User Token Scopes</strong>,
-            then reconnect your workspace from the Credentials panel.
+            . Add it under <strong>OAuth &amp; Permissions → User Token Scopes</strong>, then reconnect.
           </p>
         </div>
       )}
@@ -5881,90 +6461,316 @@ function SlackConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
         value={action}
         onChange={(e) => onChange({ action: e.target.value })}
         options={[
-          { value: 'send_message',  label: 'Send Message to Channel' },
-          { value: 'send_dm',       label: 'Send Direct Message' },
-          { value: 'upload_file',   label: 'Upload File' },
-          { value: 'read_messages', label: 'Read Messages' },
+          { group: 'Messaging', options: [
+            { value: 'send_message',  label: 'Send Message to Channel(s)' },
+            { value: 'send_dm',       label: 'Send Direct Message(s)' },
+            { value: 'read_messages', label: 'Read Messages' },
+            { value: 'read_thread',   label: 'Read Thread Replies' },
+          ]},
+          { group: 'Files', options: [
+            { value: 'upload_file', label: 'Upload File' },
+          ]},
+          { group: 'Lookup', options: [
+            { value: 'list_users',    label: 'List Workspace Users' },
+            { value: 'list_channels', label: 'List Channels' },
+          ]},
         ]}
       />
 
-      {(action === 'send_message' || action === 'upload_file' || action === 'read_messages') && (
-        <SlackResourceSelect
-          label="Channel"
-          value={String(cfg.channel ?? '')}
-          onChange={(v) => onChange({ channel: v })}
-          items={channelItems}
-          isLoading={loadingChannels}
-          isError={errorChannels}
-          placeholder="C1234567890 or {{nodes.x.channel}}"
-          renderItem={(item) => `#${item.display}`}
-          hasCredential={!!credentialId}
-          otherNodes={otherNodes}
-          testResults={testResults}
-        />
+      {/* ── Send Message ──────────────────────────────────────────── */}
+      {action === 'send_message' && (
+        <>
+          <SlackMultiPicker
+            label="Channels"
+            value={channelsValue}
+            onChange={(v) => onChange({ channels: v, channel: v })}
+            items={channelItems}
+            isLoading={loadingChannels}
+            isError={errorChannels}
+            placeholder="C1234567890 or {{nodes.x.channel}}"
+            renderItem={(item) => `#${item.display}`}
+            renderTag={(item, raw) => item ? `#${item.display}` : raw}
+            hasCredential={!!credentialId}
+            otherNodes={otherNodes}
+            testResults={testResults}
+          />
+          <ExpressionTextArea
+            label="Message Text"
+            value={String(cfg.text ?? '')}
+            onChange={(v) => onChange({ text: v })}
+            placeholder="Hello from your workflow!"
+            nodes={otherNodes}
+            testResults={testResults}
+            rows={3}
+          />
+        </>
       )}
 
+      {/* ── Send DM ───────────────────────────────────────────────── */}
       {action === 'send_dm' && (
-        <SlackResourceSelect
-          label="User"
-          value={String(cfg.userId ?? '')}
-          onChange={(v) => onChange({ userId: v })}
-          items={userItems}
-          isLoading={loadingUsers}
-          isError={errorUsers}
-          placeholder="U1234567890 or {{nodes.x.userId}}"
-          renderItem={(item) => `@${item.display}`}
-          hasCredential={!!credentialId}
-          otherNodes={otherNodes}
-          testResults={testResults}
-        />
+        <>
+          <SlackMultiPicker
+            label="Recipients"
+            value={userIdsValue}
+            onChange={(v) => onChange({ userIds: v, userId: v })}
+            items={userItems}
+            isLoading={loadingUsers}
+            isError={errorUsers}
+            placeholder="U1234567890 or {{nodes.x.userId}}"
+            renderItem={(item) => `@${item.display}`}
+            renderTag={(item, raw) => item ? `@${item.display}` : raw}
+            hasCredential={!!credentialId}
+            otherNodes={otherNodes}
+            testResults={testResults}
+          />
+          <ExpressionTextArea
+            label="Message Text"
+            value={String(cfg.text ?? '')}
+            onChange={(v) => onChange({ text: v })}
+            placeholder="Hello from your workflow!"
+            nodes={otherNodes}
+            testResults={testResults}
+            rows={3}
+          />
+        </>
       )}
 
-      {(action === 'send_message' || action === 'send_dm') && (
-        <ExpressionTextArea
-          label="Message Text"
-          value={String(cfg.text ?? '')}
-          onChange={(v) => onChange({ text: v })}
-          placeholder="Hello from your workflow!"
-          nodes={otherNodes}
-          testResults={testResults}
-          rows={3}
-        />
+      {/* ── Read Messages ─────────────────────────────────────────── */}
+      {action === 'read_messages' && (
+        <>
+          {/* Source: channel or DM */}
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Read from</label>
+            <div className="flex gap-4">
+              {([['channel', 'Channel'], ['dm', 'Direct Message']] as const).map(([val, lbl]) => (
+                <label key={val} className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" name="slack-read-source" value={val}
+                    checked={readSource === val}
+                    onChange={() => onChange({ readSource: val })}
+                    className="w-3 h-3 accent-violet-500" />
+                  <span className="text-xs text-slate-600 dark:text-slate-300">{lbl}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {readSource === 'channel' && (
+            <SlackResourceSelect
+              label="Channel"
+              value={String(cfg.channel ?? cfg.channels ?? '')}
+              onChange={(v) => onChange({ channel: v, channels: v })}
+              items={channelItems}
+              isLoading={loadingChannels}
+              isError={errorChannels}
+              placeholder="C1234567890 or {{nodes.x.channel}}"
+              renderItem={(item) => `#${item.display}`}
+              hasCredential={!!credentialId}
+              otherNodes={otherNodes}
+              testResults={testResults}
+            />
+          )}
+
+          {readSource === 'dm' && (
+            <SlackResourceSelect
+              label="User (DM)"
+              value={String(cfg.readUserId ?? '')}
+              onChange={(v) => onChange({ readUserId: v })}
+              items={userItems}
+              isLoading={loadingUsers}
+              isError={errorUsers}
+              placeholder="U1234567890 or {{nodes.x.userId}}"
+              renderItem={(item) => `@${item.display}`}
+              hasCredential={!!credentialId}
+              otherNodes={otherNodes}
+              testResults={testResults}
+            />
+          )}
+
+          {/* Message limit */}
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+              Message limit <span className="text-slate-400 font-normal">(max 200)</span>
+            </label>
+            <input type="number" min={1} max={200}
+              value={String(cfg.limit ?? 20)}
+              onChange={(e) => onChange({ limit: Number(e.target.value) })}
+              className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500" />
+            <p className="text-[10px] text-slate-400 dark:text-slate-500">
+              Messages are returned oldest → newest.
+            </p>
+          </div>
+        </>
       )}
 
+      {/* ── Read Thread ───────────────────────────────────────────── */}
+      {action === 'read_thread' && (
+        <>
+          {/* Source: channel or DM */}
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Read from</label>
+            <div className="flex gap-4">
+              {([['channel', 'Channel'], ['dm', 'Direct Message']] as const).map(([val, lbl]) => (
+                <label key={val} className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" name="slack-thread-source" value={val}
+                    checked={readSource === val}
+                    onChange={() => onChange({ readSource: val })}
+                    className="w-3 h-3 accent-violet-500" />
+                  <span className="text-xs text-slate-600 dark:text-slate-300">{lbl}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {readSource === 'channel' && (
+            <SlackResourceSelect
+              label="Channel"
+              value={String(cfg.channel ?? cfg.channels ?? '')}
+              onChange={(v) => onChange({ channel: v, channels: v })}
+              items={channelItems}
+              isLoading={loadingChannels}
+              isError={errorChannels}
+              placeholder="C1234567890 or {{nodes.x.channel}}"
+              renderItem={(item) => `#${item.display}`}
+              hasCredential={!!credentialId}
+              otherNodes={otherNodes}
+              testResults={testResults}
+            />
+          )}
+
+          {readSource === 'dm' && (
+            <SlackResourceSelect
+              label="User (DM)"
+              value={String(cfg.readUserId ?? '')}
+              onChange={(v) => onChange({ readUserId: v })}
+              items={userItems}
+              isLoading={loadingUsers}
+              isError={errorUsers}
+              placeholder="U1234567890 or {{nodes.x.userId}}"
+              renderItem={(item) => `@${item.display}`}
+              hasCredential={!!credentialId}
+              otherNodes={otherNodes}
+              testResults={testResults}
+            />
+          )}
+
+          <ExpressionInput
+            label="Thread Timestamp (ts)"
+            value={String(cfg.threadTs ?? '')}
+            onChange={(v) => onChange({ threadTs: v })}
+            placeholder="1715000000.123456 or {{nodes.x.ts}}"
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 -mt-2">
+            The <code className="font-mono bg-slate-100 dark:bg-slate-700 px-0.5 rounded">ts</code> value of the parent message — found in the output of a Read Messages node.
+          </p>
+
+          {/* Reply limit */}
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+              Reply limit <span className="text-slate-400 font-normal">(max 200)</span>
+            </label>
+            <input type="number" min={1} max={200}
+              value={String(cfg.limit ?? 50)}
+              onChange={(e) => onChange({ limit: Number(e.target.value) })}
+              className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500" />
+          </div>
+        </>
+      )}
+
+      {/* ── Upload File ───────────────────────────────────────────── */}
       {action === 'upload_file' && (
         <>
           <ExpressionInput
             label="Filename"
             value={String(cfg.filename ?? '')}
             onChange={(v) => onChange({ filename: v })}
-            placeholder="output.txt"
+            placeholder="report.pdf"
             nodes={otherNodes}
             testResults={testResults}
           />
-          <ExpressionTextArea
-            label="File Content"
-            value={String(cfg.fileContent ?? '')}
-            onChange={(v) => onChange({ fileContent: v })}
-            placeholder="File contents or an expression…"
-            nodes={otherNodes}
-            testResults={testResults}
-            rows={4}
-          />
+
+          <SlackUploadInput cfg={cfg} onChange={onChange} otherNodes={otherNodes} testResults={testResults} />
+
+          {/* ── Send to ──────────────────────────────────────────── */}
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Send to</label>
+            <div className="flex gap-4 flex-wrap">
+              {([
+                ['channel', 'Channel'],
+                ['dm',      'Direct Message'],
+                ['none',    'Upload privately'],
+              ] as const).map(([val, lbl]) => (
+                <label key={val} className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" name="slack-share-target" value={val}
+                    checked={(cfg.shareTarget ?? 'channel') === val}
+                    onChange={() => onChange({ shareTarget: val })}
+                    className="w-3 h-3 accent-violet-500" />
+                  <span className="text-xs text-slate-600 dark:text-slate-300">{lbl}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {(cfg.shareTarget ?? 'channel') === 'channel' && (
+            <SlackResourceSelect
+              label="Channel (optional)"
+              value={String(cfg.channel ?? cfg.channels ?? '')}
+              onChange={(v) => onChange({ channel: v, channels: v })}
+              items={channelItems}
+              isLoading={loadingChannels}
+              isError={errorChannels}
+              placeholder="Leave blank to upload without sharing"
+              renderItem={(item) => `#${item.display}`}
+              hasCredential={!!credentialId}
+              otherNodes={otherNodes}
+              testResults={testResults}
+            />
+          )}
+
+          {(cfg.shareTarget ?? 'channel') === 'dm' && (
+            <SlackResourceSelect
+              label="Recipient (DM)"
+              value={String(cfg.uploadUserId ?? '')}
+              onChange={(v) => onChange({ uploadUserId: v })}
+              items={userItems}
+              isLoading={loadingUsers}
+              isError={errorUsers}
+              placeholder="U1234567890 or {{nodes.x.userId}}"
+              renderItem={(item) => `@${item.display}`}
+              hasCredential={!!credentialId}
+              otherNodes={otherNodes}
+              testResults={testResults}
+            />
+          )}
         </>
       )}
 
-      {action === 'read_messages' && (
+      {/* ── List Users ────────────────────────────────────────────── */}
+      {action === 'list_users' && (
+        <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3 py-2.5">
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
+            Returns all workspace members (bots included) with their IDs, display names, and email addresses.
+            No additional configuration required.
+          </p>
+        </div>
+      )}
+
+      {/* ── List Channels ─────────────────────────────────────────── */}
+      {action === 'list_channels' && (
         <div className="space-y-1">
-          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Message limit</label>
-          <input
-            type="number"
-            min={1}
-            max={200}
-            value={String(cfg.limit ?? 10)}
-            onChange={(e) => onChange({ limit: Number(e.target.value) })}
-            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
+          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Channel type</label>
+          <div className="flex gap-4">
+            {([['all', 'All'], ['public', 'Public only'], ['private', 'Private only']] as const).map(([val, lbl]) => (
+              <label key={val} className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="slack-channel-filter" value={val}
+                  checked={channelFilter === val}
+                  onChange={() => onChange({ channelFilter: val })}
+                  className="w-3 h-3 accent-violet-500" />
+                <span className="text-xs text-slate-600 dark:text-slate-300">{lbl}</span>
+              </label>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -6808,7 +7614,7 @@ function TeamsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
     display: u.displayName || u.mail || u.userPrincipalName,
   }));
 
-  const needsTeamChannel = action === 'send_message' || action === 'read_messages';
+  const needsTeamChannel = action === 'send_message' || action === 'read_messages' || action === 'read_thread';
 
   return (
     <div className="space-y-3">
@@ -6825,6 +7631,7 @@ function TeamsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
           { value: 'send_message',  label: 'Send Channel Message' },
           { value: 'send_dm',       label: 'Send Direct Message' },
           { value: 'read_messages', label: 'Read Channel Messages' },
+          { value: 'read_thread',   label: 'Read Thread Replies' },
         ]}
       />
 
@@ -6983,6 +7790,22 @@ function TeamsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
             className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
+      )}
+
+      {action === 'read_thread' && channelId && (
+        <>
+          <ExpressionInput
+            label="Message ID (thread parent)"
+            value={String(cfg.messageId ?? '')}
+            onChange={(v) => onChange({ messageId: v })}
+            placeholder="Message ID or {{nodes.x.id}}"
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 -mt-2">
+            The <code className="font-mono bg-slate-100 dark:bg-slate-700 px-0.5 rounded">id</code> of the parent message. Found in the output of a Read Channel Messages node.
+          </p>
+        </>
       )}
     </div>
   );

@@ -45,6 +45,7 @@ import { basecampDataRoutes } from './routes/basecampDataRoutes';
 import { authRoutes } from './routes/authRoutes';
 import { adminRoutes } from './routes/adminRoutes';
 import { projectRoutes } from './routes/projectRoutes';
+import { fileRoutes } from './routes/fileRoutes';
 import { UserAuthService } from './services/UserAuthService';
 
 import { connectDatabase } from './db/database';
@@ -173,6 +174,7 @@ async function bootstrap() {
     await fastify.register(teamsDataRoutes,      { prefix: '/api', teamsAuth });
     await fastify.register(basecampDataRoutes,   { prefix: '/api', basecampAuth });
     await fastify.register(projectRoutes, { prefix: '/api' });
+    await fastify.register(fileRoutes,   { prefix: '/api' });
     // Auth & admin (no prefix-level auth guard — each route manages its own)
     await fastify.register(authRoutes,  { prefix: '/api', userAuth });
     await fastify.register(adminRoutes, { prefix: '/api' });

@@ -8,10 +8,11 @@ const ACTION_LABELS: Record<string, string> = {
   send_message:  'Send Channel Message',
   send_dm:       'Send Direct Message',
   read_messages: 'Read Messages',
+  read_thread:   'Read Thread Replies',
 };
 
 export function TeamsNodeWidget({ id, data, selected }: NodeProps<TeamsNode>) {
-  const cfg = data.config as { action?: string; teamId?: string; channelId?: string; userId?: string };
+  const cfg = data.config as { action?: string; teamId?: string; channelId?: string; userId?: string; messageId?: string };
   const actionLabel = cfg.action ? (ACTION_LABELS[cfg.action] ?? cfg.action) : null;
   return (
     <BaseNode
@@ -30,6 +31,7 @@ export function TeamsNodeWidget({ id, data, selected }: NodeProps<TeamsNode>) {
             ` → channel`
           )}
           {cfg.action === 'send_dm' && cfg.userId && ` → user`}
+          {cfg.action === 'read_thread' && cfg.channelId && ` in channel`}
         </p>
       )}
     </BaseNode>

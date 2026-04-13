@@ -306,6 +306,25 @@ export function listSlackUsers(credentialId: string) {
   return request<SlackUser[]>(`/slack/users?credentialId=${encodeURIComponent(credentialId)}`);
 }
 
+// ── File staging ──────────────────────────────────────────────
+// Pre-upload a file so its bytes never live in the workflow config JSON.
+// The returned stagedFileId is stored in the node config instead.
+
+export interface StagedFile {
+  stagedFileId: string;
+  filename:     string;
+  mimeType:     string;
+  size:         number;
+  expiresAt:    string;
+}
+
+export function stageFile(body: { filename: string; mimeType: string; data: string }) {
+  return request<StagedFile>('/files/stage', {
+    method: 'POST',
+    body:   JSON.stringify(body),
+  });
+}
+
 // ── Microsoft Teams data ──────────────────────────────────────
 
 export interface TeamsTeam {
