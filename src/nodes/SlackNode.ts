@@ -197,7 +197,7 @@ export class SlackNode implements NodeExecutor {
             await fetch(uploadRes.upload_url, {
                 method:  'POST',
                 headers: { 'Content-Type': mimeType },
-                body:    fileBytes,
+                body:    new Uint8Array(fileBytes),
             });
 
             const completeParams: Parameters<typeof client.files.completeUploadExternal>[0] = {
