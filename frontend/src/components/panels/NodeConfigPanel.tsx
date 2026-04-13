@@ -1890,8 +1890,8 @@ function SlackResultDisplay({ result }: { result: NodeTestResult }) {
                         ) : (
                           <span className="text-[9px] bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded font-semibold">📎 File</span>
                         )}
-                        {f.name && <span className="text-[9px] text-slate-500 dark:text-slate-400 truncate">{String(f.name)}</span>}
-                        {f.url && (
+                        {!!f.name && <span className="text-[9px] text-slate-500 dark:text-slate-400 truncate">{String(f.name)}</span>}
+                        {!!f.url && (
                           <a href={String(f.url)} target="_blank" rel="noopener noreferrer"
                             className="text-[9px] text-blue-500 hover:underline truncate ml-auto">
                             View
@@ -1982,7 +1982,7 @@ function SlackResultDisplay({ result }: { result: NodeTestResult }) {
       <div className="p-3 space-y-2">
         <SuccessBanner text={`File uploaded: ${out.filename ?? 'file'}`} />
         <InfoRow label="File ID"  value={String(out.fileId  ?? '')} mono />
-        {out.mimeType && <InfoRow label="MIME type" value={String(out.mimeType)} />}
+        {!!out.mimeType && <InfoRow label="MIME type" value={String(out.mimeType)} />}
       </div>
     );
   }
