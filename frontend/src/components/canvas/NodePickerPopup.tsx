@@ -51,8 +51,9 @@ const CATEGORIES: PaletteCategory[] = [
     id: 'data',
     label: 'Data',
     nodes: [
-      { type: 'transform', label: 'Transform', description: 'Map & reshape values' },
-      { type: 'output',    label: 'Output',    description: 'Final workflow result' },
+      { type: 'transform', label: 'Transform',         description: 'Map & reshape values' },
+      { type: 'formatter', label: 'Message Formatter', description: 'Beautify data for Slack, Teams, Gmail or Docs' },
+      { type: 'output',    label: 'Output',            description: 'Final workflow result' },
     ],
   },
   {

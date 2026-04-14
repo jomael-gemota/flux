@@ -53,6 +53,10 @@ const NODE_OUTPUT_FIELDS: Record<string, OutputField[]> = {
     { key: 'nextNodeId', label: 'Next node ID' },
   ],
   transform: [{ key: '…', label: 'Use the key names you defined in Mappings' }],
+  formatter: [
+    { key: 'formattedText', label: 'Formatted message text (ready to send)' },
+    { key: 'medium',        label: 'Target medium (slack / teams / gmail / gdocs)' },
+  ],
   output: [{ key: 'value', label: 'Resolved output value' }],
   gmail: [
     { key: 'messageId', label: 'Message ID (send)' },
@@ -156,6 +160,7 @@ function ValuePreview({ value }: { value: unknown }) {
 const NODE_TYPE_LABEL: Record<string, string> = {
   http: 'HTTP', llm: 'AI', trigger: 'Trigger', condition: 'Condition',
   switch: 'Switch', transform: 'Transform', output: 'Output',
+  formatter: 'Formatter',
   gmail: 'Gmail', gdrive: 'Drive', gdocs: 'Docs', gsheets: 'Sheets',
   basecamp: 'Basecamp',
 };
@@ -3039,6 +3044,9 @@ export function NodeConfigPanel() {
       {nodeType === 'output' && (
         <OutputConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
       )}
+      {nodeType === 'formatter' && (
+        <MessageFormatterConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
+      )}
       {nodeType === 'gmail' && (
         <GmailConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
       )}
@@ -3623,6 +3631,138 @@ function OutputConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
       testResults={testResults}
       hint="This value becomes the final result of the workflow execution."
     />
+  );
+}
+
+// ── Message Formatter ──────────────────────────────────────────────────────────
+
+const FORMATTER_MEDIUM_OPTIONS = [
+  { value: 'slack',  label: 'Slack (mrkdwn)'        },
+  { value: 'teams',  label: 'Microsoft Teams'        },
+  { value: 'gmail',  label: 'Gmail (HTML email)'     },
+  { value: 'gdocs',  label: 'Google Docs (plain text)' },
+];
+
+const FORMATTER_MEDIUM_HINTS: Record<string, string> = {
+  slack: 'Output uses Slack mrkdwn: *bold*, _italic_, • bullets, >blockquote.',
+  teams: 'Output is sent as HTML so Teams renders bold, italic, headings, and lists correctly.',
+  gmail: 'Output is wrapped in HTML — paste directly into a Gmail send body.',
+  gdocs: 'Output is clean plain text with decorative heading underlines and • bullets.',
+};
+
+const TEAMS_LAYOUT_HINTS: Record<string, string> = {
+  table: 'Data from nodes is displayed in a compact key → value table.',
+  text:  'Data from nodes is displayed as indented bullet points.',
+};
+
+const GMAIL_LAYOUT_HINTS: Record<string, string> = {
+  table: 'Data from nodes is displayed in a compact key → value table.',
+  text:  'Data from nodes is displayed as indented bullet points.',
+};
+
+
+const FORMATTER_SYNTAX_GUIDE = `Write your message using simple markdown:
+  # Title  →  heading
+  **text**  →  bold
+  *text* or _text_  →  italic
+  - item  →  bullet
+  1. item  →  numbered
+  > text  →  quote
+  ---  →  divider
+  {{nodes.nodeId.field}}  →  insert a value from another node`;
+
+function MessageFormatterConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
+  const medium      = String(cfg.medium      ?? 'slack');
+  const teamsLayout = String(cfg.teamsLayout ?? 'table') as 'table' | 'text';
+  const gmailLayout = String(cfg.gmailLayout ?? 'table') as 'table' | 'text';
+
+  return (
+    <>
+      <Select
+        label="Target Medium"
+        value={medium}
+        onChange={(e) => onChange({ medium: e.target.value })}
+        options={FORMATTER_MEDIUM_OPTIONS}
+      />
+      {FORMATTER_MEDIUM_HINTS[medium] && (
+        <p className="text-[10px] text-slate-400 dark:text-slate-500">{FORMATTER_MEDIUM_HINTS[medium]}</p>
+      )}
+
+      {medium === 'teams' && (
+        <div className="space-y-1">
+          <span className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+            Data Layout
+          </span>
+          <div className="flex gap-2">
+            {(['table', 'text'] as const).map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => onChange({ teamsLayout: opt })}
+                className={`flex-1 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  teamsLayout === opt
+                    ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                    : 'border-slate-600 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:border-slate-400'
+                }`}
+              >
+                {opt === 'table' ? 'Tabular' : 'Bullet Text'}
+              </button>
+            ))}
+          </div>
+          {TEAMS_LAYOUT_HINTS[teamsLayout] && (
+            <p className="text-[10px] text-slate-400 dark:text-slate-500">
+              {TEAMS_LAYOUT_HINTS[teamsLayout]}
+            </p>
+          )}
+        </div>
+      )}
+
+      {medium === 'gmail' && (
+        <div className="space-y-1">
+          <span className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+            Data Layout
+          </span>
+          <div className="flex gap-2">
+            {(['table', 'text'] as const).map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => onChange({ gmailLayout: opt })}
+                className={`flex-1 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  gmailLayout === opt
+                    ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                    : 'border-slate-600 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:border-slate-400'
+                }`}
+              >
+                {opt === 'table' ? 'Tabular' : 'Bullet Text'}
+              </button>
+            ))}
+          </div>
+          {GMAIL_LAYOUT_HINTS[gmailLayout] && (
+            <p className="text-[10px] text-slate-400 dark:text-slate-500">
+              {GMAIL_LAYOUT_HINTS[gmailLayout]}
+            </p>
+          )}
+        </div>
+      )}
+
+
+      <ExpressionTextArea
+        label="Message Template"
+        value={String(cfg.template ?? '')}
+        onChange={(v) => onChange({ template: v })}
+        placeholder={FORMATTER_SYNTAX_GUIDE}
+        nodes={otherNodes}
+        testResults={testResults}
+        rows={8}
+        resizable
+      />
+      <p className="text-[10px] text-slate-400 dark:text-slate-500">
+        Use <span className="text-blue-400">Insert variable</span> to embed values from other nodes.
+        The output key <span className="font-mono text-emerald-400">formattedText</span> contains
+        the final formatted string ready to pass to the next node.
+      </p>
+    </>
   );
 }
 
@@ -7753,15 +7893,23 @@ function TeamsConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
               />
             </div>
           ) : (
+          <>
             <Select
               label="User"
               value={String(cfg.userId ?? '')}
               onChange={(e) => onChange({ userId: e.target.value })}
               options={[
-                { value: '', label: '— select user —' },
+                { value: '',       label: '— select user —' },
+                { value: '__self__', label: 'Myself' },
                 ...userItems.map((u) => ({ value: u.id, label: u.display })),
               ]}
             />
+            {String(cfg.userId ?? '') === '__self__' && (
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                The message will be sent to your own Teams chat (i.e. the account connected above).
+              </p>
+            )}
+          </>
           )}
         </div>
       )}

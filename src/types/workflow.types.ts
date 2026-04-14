@@ -12,7 +12,8 @@ export type NodeType =
     | 'gsheets'
     | 'slack'
     | 'teams'
-    | 'basecamp';
+    | 'basecamp'
+    | 'formatter';
 
 export interface WorkflowNode {
     id: string;

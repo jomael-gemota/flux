@@ -23,6 +23,14 @@ interface TeamsConfig {
 }
 
 /**
+ * Detect whether a string is HTML (e.g. produced by the Message Formatter node).
+ * When true, the Graph API should receive contentType: 'html' so Teams renders it properly.
+ */
+function detectContentType(text: string): 'html' | 'text' {
+    return text.trimStart().startsWith('<') ? 'html' : 'text';
+}
+
+/**
  * Strip HTML tags from a Teams message body and decode common HTML entities.
  * Teams returns `contentType: "html"` for most messages.
  */
@@ -80,7 +88,7 @@ export class TeamsNode implements NodeExecutor {
                 .api(`/teams/${teamId}/channels/${channelId}/messages`)
                 .post({
                     body: {
-                        contentType: 'text',
+                        contentType: detectContentType(text),
                         content:     text,
                     },
                 });
@@ -104,25 +112,70 @@ export class TeamsNode implements NodeExecutor {
             // First resolve the current user's ID.
             const me = await client.api('/me').get() as { id: string };
 
-            const chat = await client.api('/chats').post({
-                chatType: 'oneOnOne',
-                members: [
-                    {
-                        '@odata.type':     '#microsoft.graph.aadUserConversationMember',
-                        roles:             ['owner'],
-                        'user@odata.bind': `https://graph.microsoft.com/v1.0/users('${me.id}')`,
-                    },
-                    {
-                        '@odata.type':     '#microsoft.graph.aadUserConversationMember',
-                        roles:             ['owner'],
-                        'user@odata.bind': `https://graph.microsoft.com/v1.0/users('${userId}')`,
-                    },
-                ],
-            }) as { id: string };
+            // '__self__' is a sentinel meaning "the authenticated user".
+            const resolvedUserId = userId === '__self__' ? me.id : userId;
+
+            let chat: { id: string };
+
+            if (me.id === resolvedUserId) {
+                // Self-DM: the Graph API cannot *create* a self-chat (requires 2 different
+                // members), but Teams always has one pre-existing. Find it by paginating
+                // through all oneOnOne chats until we locate the one where every member
+                // with a resolved userId is the current user.
+                type ChatPage = {
+                    value: Array<{ id: string; members?: Array<{ userId?: string; [k: string]: unknown }> }>;
+                    '@odata.nextLink'?: string;
+                };
+
+                let selfChat: { id: string } | undefined;
+                let nextLink: string | undefined =
+                    "/me/chats?$filter=chatType eq 'oneOnOne'&$expand=members";
+
+                while (nextLink && !selfChat) {
+                    const page = await client.api(nextLink).get() as ChatPage;
+
+                    selfChat = (page.value ?? []).find((c) => {
+                        const memberIds = (c.members ?? [])
+                            .map((m) => m.userId)
+                            .filter((id): id is string => Boolean(id));
+                        // A self-chat has at least one member entry and every
+                        // resolved member ID belongs to the current user.
+                        return memberIds.length > 0 && memberIds.every((id) => id === me.id);
+                    });
+
+                    nextLink = page['@odata.nextLink'];
+                }
+
+                if (!selfChat) {
+                    throw new Error(
+                        'Could not find your self-chat in Microsoft Teams. ' +
+                        'Open Teams, navigate to your own profile and send yourself a message ' +
+                        'once to create it, then retry.',
+                    );
+                }
+
+                chat = { id: selfChat.id };
+            } else {
+                chat = await client.api('/chats').post({
+                    chatType: 'oneOnOne',
+                    members: [
+                        {
+                            '@odata.type':     '#microsoft.graph.aadUserConversationMember',
+                            roles:             ['owner'],
+                            'user@odata.bind': `https://graph.microsoft.com/v1.0/users('${me.id}')`,
+                        },
+                        {
+                            '@odata.type':     '#microsoft.graph.aadUserConversationMember',
+                            roles:             ['owner'],
+                            'user@odata.bind': `https://graph.microsoft.com/v1.0/users('${resolvedUserId}')`,
+                        },
+                    ],
+                }) as { id: string };
+            }
 
             const message = await client.api(`/chats/${chat.id}/messages`).post({
                 body: {
-                    contentType: 'text',
+                    contentType: detectContentType(text),
                     content:     text,
                 },
             }) as { id: string; createdDateTime: string };

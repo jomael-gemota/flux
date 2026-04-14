@@ -59,6 +59,7 @@ import { ConditionNode } from './nodes/ConditionNode';
 import { SwitchNode } from './nodes/SwitchNode';
 import { TransformNode } from './nodes/TransformNode';
 import { OutputNode } from './nodes/OutputNode';
+import { MessageFormatterNode } from './nodes/MessageFormatterNode';
 import { runSeeds } from './db/seeds';
 
 import { ApiKeyModel } from './db/models/ApiKeyModel';
@@ -80,6 +81,7 @@ async function bootstrap() {
 	registry.register('switch', new SwitchNode());
     registry.register('transform', new TransformNode());
     registry.register('output', new OutputNode());
+    registry.register('formatter', new MessageFormatterNode());
     const runner = new WorkflowRunner(registry);
 
     // 2a. User auth service
