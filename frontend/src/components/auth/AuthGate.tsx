@@ -93,7 +93,7 @@ function RejectedPage() {
   return (
     <div className="min-h-screen bg-[#E9EEF6] dark:bg-[#171717] flex items-center justify-center p-4">
       <div className="bg-white dark:bg-[#1E293B] border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center">
-        <img src="/logo.png" alt="Flux" className="w-12 h-12 rounded-xl mx-auto mb-5" />
+        <img src="/logo.png" alt="Flux Workflow" className="w-12 h-12 rounded-xl mx-auto mb-5" />
         <div className="flex items-center justify-center w-12 h-12 rounded-full bg-red-100 dark:bg-red-500/20 mx-auto mb-4">
           <svg className="w-6 h-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="frontend/public/logo.png" alt="Flux" width="96" />
-  <h1>Flux</h1>
+  <img src="frontend/public/logo.png" alt="Flux Workflow" width="96" />
+  <h1>Flux Workflow</h1>
   <p><strong>AI-powered visual workflow automation platform</strong></p>
 
   <p>
@@ -27,7 +27,7 @@
 
 ## Overview
 
-**Flux** is a self-hosted, visual workflow automation platform that lets you build, run, and monitor multi-step automated workflows through a drag-and-drop canvas. Connect AI language models (OpenAI, Anthropic, Google Gemini), web services, and your favourite productivity tools — no scripting required.
+**Flux Workflow** is a self-hosted, visual workflow automation platform that lets you build, run, and monitor multi-step automated workflows through a drag-and-drop canvas. Connect AI language models (OpenAI, Anthropic, Google Gemini), web services, and your favourite productivity tools — no scripting required.
 
 Think of it as your own private n8n, purpose-built for teams that want full control over their automation infrastructure and AI integrations.
 

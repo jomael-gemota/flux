@@ -176,8 +176,8 @@ export function Toolbar() {
 
     <header className="h-12 glass-surface border-b border-black/[0.07] dark:border-white/10 flex items-center px-4 gap-4 shrink-0">
       <div className="flex items-center gap-2">
-        <img src="/logo.png" alt="Flux" className="w-6 h-6 rounded-md object-contain" />
-        <span className="font-semibold text-sm text-slate-700 dark:text-slate-200">Flux</span>
+        <img src="/logo.png" alt="Flux Workflow" className="w-6 h-6 rounded-md object-contain" />
+        <span className="font-semibold text-sm text-slate-700 dark:text-slate-200">Flux Workflow</span>
       </div>
 
       <div className="w-px h-6 glass-divider" />

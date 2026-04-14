@@ -23,9 +23,9 @@ export function ApiKeyGate({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950 flex items-center justify-center">
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-8 w-full max-w-md">
         <div className="flex items-center gap-3 mb-6">
-          <img src="/logo.png" alt="Flux" className="w-12 h-12 rounded-xl object-contain shrink-0" />
+          <img src="/logo.png" alt="Flux Workflow" className="w-12 h-12 rounded-xl object-contain shrink-0" />
           <div>
-            <h1 className="text-gray-900 dark:text-white font-bold text-lg">Flux</h1>
+            <h1 className="text-gray-900 dark:text-white font-bold text-lg">Flux Workflow</h1>
             <p className="text-slate-500 dark:text-slate-400 text-sm">Enter your API key to continue</p>
           </div>
         </div>

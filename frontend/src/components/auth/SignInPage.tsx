@@ -132,7 +132,7 @@ export function SignInPage({ error }: { error?: string }) {
               Secure workspace access
             </div>
             <h2 className="mt-5 text-2xl font-bold leading-tight">
-              Build and run smarter workflows with Flux
+              Build and run smarter workflows with Flux Workflow
             </h2>
             <p className="mt-3 text-sm text-white/85 leading-relaxed">
               Connect your tools, automate repetitive work, and monitor executions in one clean canvas.
@@ -158,9 +158,9 @@ export function SignInPage({ error }: { error?: string }) {
         {/* Right panel */}
         <div className="p-7 sm:p-8">
           <div className="flex flex-col items-center gap-3 mb-7">
-            <img src="/logo.png" alt="Flux" className="w-16 h-16 rounded-2xl object-contain shadow-md" />
+            <img src="/logo.png" alt="Flux Workflow" className="w-16 h-16 rounded-2xl object-contain shadow-md" />
             <div className="text-center">
-              <h1 className="text-xl font-bold text-gray-900 dark:text-white">Welcome to Flux</h1>
+              <h1 className="text-xl font-bold text-gray-900 dark:text-white">Welcome to Flux Workflow</h1>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
                 Sign in to continue to your automation workspace
               </p>
