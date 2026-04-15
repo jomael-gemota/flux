@@ -23,6 +23,8 @@ export interface ExecutionSummary {
     startedAt: Date;
     completedAt: Date;
     results: unknown[];
+    triggeredBy?: string;
+    testNodeId?: string;
 }
 
 export interface PaginatedResponse<T> {

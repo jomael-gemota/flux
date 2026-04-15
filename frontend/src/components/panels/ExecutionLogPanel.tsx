@@ -1,13 +1,14 @@
 import { useState, useMemo, useEffect } from 'react';
 import {
   CheckCircle2, XCircle, Clock, Loader2, X, ChevronLeft,
-  AlertCircle, SkipForward, Trash2,
+  AlertCircle, SkipForward, Trash2, Zap,
 } from 'lucide-react';
 import { useWorkflowStore } from '../../store/workflowStore';
 import { useExecutionLog, useExecution, useDeleteExecution, useDeleteExecutions } from '../../hooks/useExecutions';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { useResizablePanel } from '../../hooks/useResizablePanel';
 import type { ExecutionSummary, NodeResult } from '../../types/workflow';
+// ExecutionSummary is used for triggeredBy/testNodeId access on list rows
 
 const LS_LOG_SIDEBAR_W  = 'wap_log_sidebar_width';
 const SIDEBAR_DEFAULT   = 208;   // same as w-52
@@ -208,11 +209,13 @@ function ExecutionList({
   selectedId,
   onSelect,
   onDeleted,
+  nodeNameMap,
 }: {
   workflowId: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onDeleted?: (ids: string[]) => void;
+  nodeNameMap?: Record<string, string>;
 }) {
   const [fetchLimit, setFetchLimit] = useState(PAGE_SIZE);
   const { data: paginatedData, isLoading } = useExecutionLog(workflowId, fetchLimit);
@@ -346,6 +349,9 @@ function ExecutionList({
           const duration = exec.completedAt
             ? new Date(exec.completedAt).getTime() - new Date(exec.startedAt).getTime()
             : null;
+          const isStepRun = (exec as ExecutionSummary).triggeredBy === 'step-run';
+          const stepNodeId = (exec as ExecutionSummary).testNodeId;
+          const stepNodeName = stepNodeId && nodeNameMap ? (nodeNameMap[stepNodeId] ?? stepNodeId) : null;
 
           return (
             <div
@@ -369,23 +375,33 @@ function ExecutionList({
               />
 
               <div className="mt-0.5 shrink-0">
-                <ExecStatusIcon status={exec.status} size="xs" />
+                {isStepRun
+                  ? <Zap className="w-3 h-3 text-violet-400" />
+                  : <ExecStatusIcon status={exec.status} size="xs" />}
               </div>
 
               <div className="flex-1 min-w-0">
                 <p className="text-[11px] text-slate-600 dark:text-slate-300 font-medium truncate">
-                  {fmtDate(exec.startedAt)} · {fmtTime(exec.startedAt)}
+                  {isStepRun && stepNodeName
+                    ? stepNodeName
+                    : `${fmtDate(exec.startedAt)} · ${fmtTime(exec.startedAt)}`}
                 </p>
-                  <p className="text-[10px] text-slate-400 dark:text-slate-600 font-mono">
-                  {exec.executionId.slice(0, 8)}
+                <p className="text-[10px] text-slate-400 dark:text-slate-600 font-mono">
+                  {isStepRun
+                    ? `${fmtDate(exec.startedAt)} · ${fmtTime(exec.startedAt)}`
+                    : exec.executionId.slice(0, 8)}
                   {duration != null && (
                     <span className="text-slate-400 dark:text-slate-500 ml-1">· {fmtDuration(duration)}</span>
                   )}
                 </p>
               </div>
 
-              <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold shrink-0 mt-0.5 ${STATUS_BADGE[exec.status] ?? ''}`}>
-                {exec.status}
+              <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold shrink-0 mt-0.5 ${
+                isStepRun
+                  ? 'bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300 border border-violet-300 dark:border-violet-500/30'
+                  : STATUS_BADGE[exec.status] ?? ''
+              }`}>
+                {isStepRun ? 'step' : exec.status}
               </span>
 
               {/* Per-row trash — visible on hover */}
@@ -573,6 +589,7 @@ export function ExecutionLogPanel() {
     }
   }, [selectedExec?.executionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+
   const [sidebarWidth, startSidebarDrag] = useResizablePanel(
     LS_LOG_SIDEBAR_W, SIDEBAR_DEFAULT, SIDEBAR_MIN, SIDEBAR_MAX,
     'x', false,   // drag rightward = grow
@@ -656,12 +673,12 @@ export function ExecutionLogPanel() {
             <ExecutionList
               workflowId={workflowId}
               selectedId={selectedExecId}
+              nodeNameMap={nodeNameMap}
               onSelect={(id) => {
                 setSelectedExecId(id);
                 setSelectedNodeId(null);
               }}
               onDeleted={(ids) => {
-                // If the currently-viewed execution was deleted, reset the right pane
                 const deletedAll = ids.length === 0;
                 if (deletedAll || (selectedExecId && ids.includes(selectedExecId))) {
                   setSelectedExecId(null);

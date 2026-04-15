@@ -171,6 +171,43 @@ export class ExecutionRepository {
         return map;
     }
 
+    async createStepRun(
+        executionId: string,
+        workflowId: string,
+        workflowVersion: number,
+        nodeId: string,
+        result: { status: 'success' | 'failure'; output: unknown; error?: string; durationMs: number }
+    ): Promise<void> {
+        const nodeResult: NodeResult = {
+            nodeId,
+            status: result.status,
+            output: result.output,
+            error: result.error,
+            durationMs: result.durationMs,
+        };
+        const now = new Date();
+        await ExecutionModel.create({
+            executionId,
+            workflowId,
+            workflowVersion,
+            status: result.status,
+            input: null,
+            results: [nodeResult],
+            logs: [{
+                nodeId,
+                status: result.status,
+                output: result.output,
+                error: result.error,
+                durationMs: result.durationMs,
+                executedAt: now,
+            }],
+            startedAt: now,
+            completedAt: now,
+            triggeredBy: 'step-run',
+            testNodeId: nodeId,
+        });
+    }
+
     private docToSummary(doc: InstanceType<typeof ExecutionModel>): ExecutionSummary {
         return {
             executionId: doc.executionId,
@@ -179,6 +216,8 @@ export class ExecutionRepository {
             results: doc.results,
             startedAt: doc.startedAt,
             completedAt: doc.completedAt ?? new Date(),
+            triggeredBy: doc.triggeredBy,
+            testNodeId: doc.testNodeId,
         };
     }
 }

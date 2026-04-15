@@ -1,9 +1,10 @@
-import { Fragment } from 'react';
+import { Fragment, useState, useRef, useCallback } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { ReactNode } from 'react';
 import { useWorkflowStore } from '../../store/workflowStore';
 import type { NodeExecutionStatus } from '../../store/workflowStore';
 import { NodeIcon, nodeHeaderColor } from './NodeIcons';
+import { NodeToolbarMenu } from './NodeToolbarMenu';
 
 // ── Status overlays ────────────────────────────────────────────────────────────
 
@@ -69,6 +70,18 @@ export function BaseNode({
   children,
   handles,
 }: BaseNodeProps) {
+  const [isHovered, setIsHovered] = useState(false);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToolbar = useCallback(() => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    setIsHovered(true);
+  }, []);
+
+  const hideToolbar = useCallback(() => {
+    hideTimerRef.current = setTimeout(() => setIsHovered(false), 120);
+  }, []);
+
   const status = useWorkflowStore(
     (s) => (nodeId ? s.executionStatuses[nodeId] : undefined),
   );
@@ -89,7 +102,20 @@ export function BaseNode({
     <div
       className={`relative overflow-visible transition-opacity duration-300 ${wrapperCls}`}
       style={{ width: SZ, height: SZ }}
+      onMouseEnter={showToolbar}
+      onMouseLeave={hideToolbar}
     >
+      {/* ── Node toolbar (hover) ──────────────────────────────────────────── */}
+      {nodeId && (
+        <NodeToolbarMenu
+          nodeId={nodeId}
+          nodeLabel={label}
+          isDisabled={isDisabled}
+          isVisible={isHovered}
+          onMouseEnter={showToolbar}
+          onMouseLeave={hideToolbar}
+        />
+      )}
       {/* ── Square card ─────────────────────────────────────────────────────── */}
       <div
         className={[

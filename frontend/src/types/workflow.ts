@@ -68,6 +68,8 @@ export interface ExecutionSummary {
   startedAt: string;
   completedAt: string;
   results: NodeResult[];
+  triggeredBy?: string;
+  testNodeId?: string;
 }
 
 export interface PaginatedResponse<T> {

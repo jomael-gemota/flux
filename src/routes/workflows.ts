@@ -225,6 +225,68 @@ export async function workflowRoutes(
         }
     );
 
+    // ── Single-node step run (append-only, permanent in execution log) ──────────
+
+    fastify.post<{ Params: { id: string; nodeId: string } }>(
+        '/workflows/:id/nodes/:nodeId/run',
+        {
+            preHandler: apiKeyAuth,
+            schema: { body: { type: 'object' } },
+        },
+        async (request, reply) => {
+            const userId = getRequestUserId(request);
+
+            const workflow = await workflowRepo.findById(request.params.id, userId);
+            if (!workflow) throw NotFoundError(`Workflow ${request.params.id}`);
+
+            const node = workflow.nodes.find(n => n.id === request.params.nodeId);
+            if (!node) throw NotFoundError(`Node ${request.params.nodeId} in workflow ${request.params.id}`);
+
+            const executor = registry.get(node.type);
+
+            // Inject other nodes' most-recent test outputs so expressions resolve
+            const savedTestResults = await executionRepo.findAllNodeTestResults(workflow.id);
+            const injectedVars: Record<string, unknown> = {};
+            for (const [nid, result] of Object.entries(savedTestResults)) {
+                if (nid !== node.id && result.status === 'success') {
+                    injectedVars[nid] = result.output;
+                }
+            }
+
+            const executionId = crypto.randomUUID();
+            const execContext: ExecutionContext = {
+                workflowId: workflow.id,
+                executionId,
+                variables: { ...injectedVars },
+                startedAt: new Date(),
+            };
+
+            const start = Date.now();
+
+            try {
+                const output = await executor.execute(node, execContext);
+                const durationMs = Date.now() - start;
+                await executionRepo.createStepRun(executionId, workflow.id, workflow.version, node.id, {
+                    status: 'success',
+                    output,
+                    durationMs,
+                });
+            } catch (err: unknown) {
+                const durationMs = Date.now() - start;
+                const error = err instanceof Error ? err.message : String(err);
+                await executionRepo.createStepRun(executionId, workflow.id, workflow.version, node.id, {
+                    status: 'failure',
+                    output: null,
+                    error,
+                    durationMs,
+                });
+            }
+
+            const summary = await executionRepo.findById(executionId);
+            return reply.code(200).send(summary);
+        }
+    );
+
     fastify.get<{ Params: { id: string } }>(
         '/workflows/:id/node-test-results',
         { preHandler: apiKeyAuth },

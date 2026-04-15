@@ -158,6 +158,14 @@ export function getNodeTestResults(workflowId: string) {
   );
 }
 
+/** Execute a single node as a permanent, append-only run stored in the execution log. */
+export function runNode(workflowId: string, nodeId: string) {
+  return request<ExecutionSummary>(
+    `/workflows/${workflowId}/nodes/${nodeId}/run`,
+    { method: 'POST', body: JSON.stringify({}) }
+  );
+}
+
 // ── Executions ───────────────────────────────────────────────
 
 export function listExecutions(workflowId: string, limit = 20, cursor?: string) {

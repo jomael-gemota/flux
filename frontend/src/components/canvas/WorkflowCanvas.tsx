@@ -41,8 +41,10 @@ import { BasecampNodeWidget } from '../nodes/BasecampNodeWidget';
 import { TriggerNodeWidget } from '../nodes/TriggerNodeWidget';
 import { MessageFormatterNodeWidget } from '../nodes/MessageFormatterNodeWidget';
 import type { NodeType } from '../../types/workflow';
-import { Plus, FolderPlus, Workflow, X } from 'lucide-react';
+import { Plus, FolderPlus, Workflow, X, AlertTriangle, Loader2 } from 'lucide-react';
 import { createPortal } from 'react-dom';
+import { ConfirmModal } from '../ui/ConfirmModal';
+import { NodeIcon } from '../nodes/NodeIcons';
 
 function randomId() {
   return Math.random().toString(36).slice(2, 10);
@@ -136,6 +138,12 @@ export function WorkflowCanvas() {
     setCanvasViewport,
     createNewWorkflow,
     setPendingNewProjectName,
+    pendingDeleteNodeId,
+    setPendingDeleteNodeId,
+    deleteNode,
+    nodeDisableModal,
+    setNodeDisableModal,
+    setNodeDisabled,
   } = useWorkflowStore();
 
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -293,14 +301,13 @@ export function WorkflowCanvas() {
     ({ nodes: selected }: OnSelectionChangeParams) => {
       const workflowSelected = selected.filter((n) => n.type !== 'stickyNote');
       if (workflowSelected.length === 1 && selected.length === 1) {
-        // Exactly one workflow node selected — open config
+        // Track the selected node but do NOT auto-open config — use the toolbar Config icon
         setSelectedNodeId(workflowSelected[0].id);
-        setConfigOpen(true);
       } else if (selected.length === 0) {
         setSelectedNodeId(null);
         setConfigOpen(false);
       } else {
-        // Multiple selections or only sticky notes — close config
+        // Multiple selections or only sticky notes
         setSelectedNodeId(null);
         setConfigOpen(false);
       }
@@ -314,10 +321,10 @@ export function WorkflowCanvas() {
       if (event.ctrlKey || event.metaKey || event.shiftKey) return;
       // Sticky notes: no config panel
       if (node.type === 'stickyNote') return;
+      // Track selected node ID but don't open config — use toolbar Config icon instead
       setSelectedNodeId(node.id);
-      setConfigOpen(true);
     },
-    [setSelectedNodeId, setConfigOpen]
+    [setSelectedNodeId]
   );
 
   const onNodeDoubleClick = useCallback(
@@ -369,11 +376,10 @@ export function WorkflowCanvas() {
 
   const handleDelete = useCallback(
     (nodeId: string) => {
-      setNodes(nodesRef.current.filter((n) => n.id !== nodeId));
-      setEdges(edgesRef.current.filter((e) => e.source !== nodeId && e.target !== nodeId));
-      setDirty(true);
+      // Route through the confirmation modal
+      setPendingDeleteNodeId(nodeId);
     },
-    [setNodes, setEdges, setDirty]
+    [setPendingDeleteNodeId]
   );
 
   // ── Keyboard: copy/paste, duplicate ────────────────────────────────────────
@@ -704,6 +710,99 @@ export function WorkflowCanvas() {
         onDelete={handleDelete}
         onClose={() => setContextMenu(null)}
       />
+
+      {/* ── Delete confirmation modal ──────────────────────────────────────────── */}
+      {(() => {
+        const targetNode = pendingDeleteNodeId
+          ? nodes.find((n) => n.id === pendingDeleteNodeId)
+          : null;
+        return (
+          <ConfirmModal
+            open={!!pendingDeleteNodeId}
+            title="Delete node"
+            message={
+              targetNode
+                ? `Are you sure you want to delete "${targetNode.data.label}"? This will also remove all connected edges and cannot be undone.`
+                : 'Are you sure you want to delete this node? This will also remove all connected edges and cannot be undone.'
+            }
+            confirmLabel="Delete"
+            danger
+            onConfirm={() => {
+              if (pendingDeleteNodeId) deleteNode(pendingDeleteNodeId);
+            }}
+            onCancel={() => setPendingDeleteNodeId(null)}
+          />
+        );
+      })()}
+
+      {/* ── Disable node warning modal (toolbar-triggered) ────────────────────── */}
+      {nodeDisableModal.open && nodeDisableModal.nodeId && (() => {
+        const targetNode = nodes.find((n) => n.id === nodeDisableModal.nodeId);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-[1px]"
+              onClick={() => setNodeDisableModal({ open: false, nodeId: null, dependents: [] })}
+            />
+            <div className="relative bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl w-full max-w-sm mx-4 p-5">
+              <button
+                onClick={() => setNodeDisableModal({ open: false, nodeId: null, dependents: [] })}
+                className="absolute top-3 right-3 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <div className="flex items-start gap-3 pr-5">
+                <div className="w-8 h-8 rounded-full bg-amber-500/15 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Node output is in use</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                    <span className="font-medium text-gray-800 dark:text-slate-200">"{targetNode?.data.label ?? 'This node'}"</span> is referenced by{' '}
+                    <span className="font-medium text-amber-600 dark:text-amber-300">
+                      {nodeDisableModal.dependents.length} node{nodeDisableModal.dependents.length !== 1 ? 's' : ''}
+                    </span>.
+                    Disabling it will cause those nodes to fail with an error when the workflow runs.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3.5 space-y-1.5 max-h-44 overflow-y-auto">
+                {nodeDisableModal.dependents.map((dep) => (
+                  <div
+                    key={dep.id}
+                    className="flex items-center gap-2 px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900/70 rounded-md border border-slate-200 dark:border-slate-700/50"
+                  >
+                    <span className="shrink-0 opacity-70">
+                      <NodeIcon type={dep.data.nodeType} size={12} />
+                    </span>
+                    <span className="text-xs font-medium text-gray-800 dark:text-slate-200 truncate flex-1">{dep.data.label}</span>
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0 uppercase tracking-wide">{dep.data.nodeType}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <button
+                  onClick={() => setNodeDisableModal({ open: false, nodeId: null, dependents: [] })}
+                  className="px-3.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-gray-900 dark:hover:text-white bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const id = nodeDisableModal.nodeId;
+                    setNodeDisableModal({ open: false, nodeId: null, dependents: [] });
+                    if (id) setNodeDisabled(id, true);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors"
+                >
+                  <Loader2 className="w-3 h-3 hidden" />
+                  Disable anyway
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Empty workflow overlay */}
       {workflowNodeCount === 0 && !pickerOpen && (

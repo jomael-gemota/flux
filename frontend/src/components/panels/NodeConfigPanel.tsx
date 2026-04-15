@@ -2780,7 +2780,7 @@ export function NodeConfigPanel() {
     return (
       <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-600 gap-2 px-4 text-center">
         <Settings2 className="w-8 h-8" />
-        <p className="text-xs">Click a node to edit its configuration</p>
+        <p className="text-xs">Hover a node and click the <span className="font-medium text-slate-500 dark:text-slate-400">config icon</span> to edit it</p>
       </div>
     );
   }

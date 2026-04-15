@@ -28,6 +28,12 @@ export type NodeExecutionStatus =
   | 'failure'
   | 'skipped';
 
+interface NodeDisableModal {
+  open: boolean;
+  nodeId: string | null;
+  dependents: CanvasNode[];
+}
+
 interface WorkflowStore {
   // Theme
   theme: 'dark' | 'light';
@@ -97,6 +103,20 @@ interface WorkflowStore {
   switchingToWorkflowId: string | null;
   setIsSwitchingWorkflow: (v: boolean) => void;
   setSwitchingToWorkflowId: (id: string | null) => void;
+
+  // Node toolbar actions
+  /** When non-null, the delete confirmation modal is shown for this node id */
+  pendingDeleteNodeId: string | null;
+  setPendingDeleteNodeId: (id: string | null) => void;
+  /** Confirmed delete: removes the node and all its connected edges */
+  deleteNode: (nodeId: string) => void;
+  /** Duplicate a node with a new id and offset position */
+  duplicateNode: (nodeId: string) => void;
+  /** Directly enable or disable a node (caller is responsible for showing modal if needed) */
+  setNodeDisabled: (nodeId: string, disabled: boolean) => void;
+  /** Disable warning modal state (shown when other nodes reference the target node) */
+  nodeDisableModal: NodeDisableModal;
+  setNodeDisableModal: (modal: NodeDisableModal) => void;
 }
 
 export const useWorkflowStore = create<WorkflowStore>((set) => ({
@@ -176,4 +196,39 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
   switchingToWorkflowId: null,
   setIsSwitchingWorkflow: (v) => set({ isSwitchingWorkflow: v }),
   setSwitchingToWorkflowId: (id) => set({ switchingToWorkflowId: id }),
+
+  pendingDeleteNodeId: null,
+  setPendingDeleteNodeId: (id) => set({ pendingDeleteNodeId: id }),
+  deleteNode: (nodeId) =>
+    set((state) => ({
+      nodes: state.nodes.filter((n) => n.id !== nodeId),
+      edges: state.edges.filter((e) => e.source !== nodeId && e.target !== nodeId),
+      selectedNodeId: state.selectedNodeId === nodeId ? null : state.selectedNodeId,
+      configOpen: state.selectedNodeId === nodeId ? false : state.configOpen,
+      pendingDeleteNodeId: null,
+      isDirty: true,
+    })),
+  duplicateNode: (nodeId) =>
+    set((state) => {
+      const source = state.nodes.find((n) => n.id === nodeId);
+      if (!source) return {};
+      const prefix = source.type === 'stickyNote' ? 'sticky' : 'node';
+      const newId = `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+      const newNode: CanvasNode = {
+        ...source,
+        id: newId,
+        position: { x: source.position.x + 24, y: source.position.y + 24 },
+        selected: false,
+      };
+      return { nodes: [...state.nodes, newNode], isDirty: true };
+    }),
+  setNodeDisabled: (nodeId, disabled) =>
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        n.id === nodeId ? { ...n, data: { ...n.data, disabled } } : n
+      ),
+      isDirty: true,
+    })),
+  nodeDisableModal: { open: false, nodeId: null, dependents: [] },
+  setNodeDisableModal: (modal) => set({ nodeDisableModal: modal }),
 }));

@@ -31,4 +31,16 @@ export function useTestNode() {
   });
 }
 
+/** Run a single node as a permanent execution stored in the log. */
+export function useRunNode() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ workflowId, nodeId }: { workflowId: string; nodeId: string }) =>
+      api.runNode(workflowId, nodeId),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['executions', vars.workflowId] });
+    },
+  });
+}
+
 export type { NodeTestResult };
