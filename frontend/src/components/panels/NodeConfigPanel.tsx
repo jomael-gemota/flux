@@ -3286,6 +3286,10 @@ const LLM_PROVIDERS: Record<string, LLMProviderEntry> = {
     label: 'Google Gemini',
     description: "Google's Gemini models are natively multimodal, handling text, images, audio, video, and code. They offer a 1M+ token context window and competitive frontier-class intelligence.",
   },
+  meta: {
+    label: 'Meta (Llama)',
+    description: "Meta's Llama models are not available yet — we are currently on the waitlist for access to the Llama API. Once approved, the Llama 4 family (Maverick, Scout) and Llama 3.3 will be available here.",
+  },
 };
 
 const LLM_MODELS: Record<string, LLMModelEntry[]> = {
@@ -3340,6 +3344,23 @@ const LLM_MODELS: Record<string, LLMModelEntry[]> = {
       value: 'gemini-2.5-flash',
       label: 'Gemini 2.5 Flash',
       description: "Google's best stable (GA) price-performance model. Low-latency and high-volume ready with solid reasoning — no preview caveats.",
+    },
+  ],
+  meta: [
+    {
+      value: 'Llama-4-Maverick-17B-128E-Instruct-FP8',
+      label: 'Llama 4 Maverick',
+      description: "Meta's most capable Llama 4 model. 400B total parameters (17B active) across 128 experts, with a 1M token context and native multimodal input. Best for complex reasoning and agentic tasks.",
+    },
+    {
+      value: 'Llama-4-Scout-17B-16E-Instruct',
+      label: 'Llama 4 Scout',
+      description: 'Efficient Llama 4 model with a massive 10M token context window and native multimodal support. Runs on a single GPU — great balance of power and cost.',
+    },
+    {
+      value: 'Llama-3.3-70B-Instruct',
+      label: 'Llama 3.3 70B',
+      description: 'High-quality text-only model approaching Llama 3.1 405B performance. A solid and cost-effective choice for text generation, summarization, and instruction-following.',
     },
   ],
 };

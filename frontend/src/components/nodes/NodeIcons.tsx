@@ -11,7 +11,7 @@ import type { NodeType } from '../../types/workflow';
  * appear smaller than SVG icons that fill their viewBox edge-to-edge.
  * A 1.3× CSS transform closes that gap without affecting layout metrics.
  */
-function LogoImg({ src, size, alt }: { src: string; size: number; alt: string }) {
+function LogoImg({ src, size, alt, scale = 1.3 }: { src: string; size: number; alt: string; scale?: number }) {
   return (
     <img
       src={src}
@@ -22,7 +22,7 @@ function LogoImg({ src, size, alt }: { src: string; size: number; alt: string })
         width: size,
         height: size,
         objectFit: 'contain',
-        transform: 'scale(1.3)',
+        transform: `scale(${scale})`,
         transformOrigin: 'center',
       }}
     />
@@ -48,11 +48,15 @@ export function GSheetsIcon({ size = 14 }: { size?: number }) {
 }
 
 export function OpenAIIcon({ size = 14 }: { size?: number }) {
-  return <LogoImg src="/logos/open-ai-removebg-preview.png" size={size} alt="OpenAI" />;
+  return <LogoImg src="/logos/openai.png" size={size} alt="OpenAI" scale={1.9} />;
 }
 
 export function AnthropicIcon({ size = 14 }: { size?: number }) {
-  return <LogoImg src="/logos/anthropic.jpg" size={size} alt="Anthropic" />;
+  return <LogoImg src="/logos/anthropic.png" size={size} alt="Anthropic" scale={1.9} />;
+}
+
+export function MetaIcon({ size = 14 }: { size?: number }) {
+  return <LogoImg src="/logos/meta.png" size={size} alt="Meta" scale={1.9} />;
 }
 
 export function BasecampIcon({ size = 14 }: { size?: number }) {
@@ -126,6 +130,7 @@ export function NodeIcon({ type, size = 13 }: { type: NodeType | string; size?: 
     case 'llm':       return <OpenAIIcon  size={size} />;
     case 'anthropic': return <AnthropicIcon size={size} />;
     case 'gemini':    return <GeminiIcon  size={size} />;
+    case 'meta':      return <MetaIcon    size={size} />;
     case 'condition': return <GitBranch   size={size} className={LUCIDE_CLS} />;
     case 'switch':    return <Shuffle     size={size} className={LUCIDE_CLS} />;
     case 'transform': return <Wand2       size={size} className={LUCIDE_CLS} />;

@@ -1,4 +1,4 @@
-export type LLMProviderName = 'openai' | 'anthropic' | 'gemini';
+export type LLMProviderName = 'openai' | 'anthropic' | 'gemini' | 'meta';
 
 export interface ChatMessage {
     role: 'system' | 'user' | 'assistant';

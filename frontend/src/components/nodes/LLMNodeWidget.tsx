@@ -8,7 +8,8 @@ export function LLMNodeWidget({ id, data, selected }: NodeProps<LLMNode>) {
   const cfg = data.config as { provider?: string; model?: string };
   const iconType =
     cfg.provider === 'anthropic' ? 'anthropic' :
-    cfg.provider === 'gemini'    ? 'gemini'    : 'llm';
+    cfg.provider === 'gemini'    ? 'gemini'    :
+    cfg.provider === 'meta'      ? 'meta'      : 'llm';
   return (
     <BaseNode
       nodeId={id}
