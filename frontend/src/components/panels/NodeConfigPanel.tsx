@@ -1,5 +1,6 @@
 import { Settings2, Star, Braces, Play, Loader2, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Clock, Copy, Check, ArrowRight, Power, X, AlertTriangle, Save, Wand2, Info } from 'lucide-react';
 import { useRef, useState, useEffect, useMemo, type ReactNode } from 'react';
+import { HttpBodyEditor, type BodyLanguage } from './HttpBodyEditor';
 import { useWorkflowStore } from '../../store/workflowStore';
 import type { CanvasNode } from '../../store/workflowStore';
 import { Select } from '../ui/Input';
@@ -246,7 +247,7 @@ function DisplayValue({ value, nodes, placeholder }: { value: string; nodes: Can
 
 // ── Variable picker panel ─────────────────────────────────────────────────────
 
-function VariablePickerPanel({
+export function VariablePickerPanel({
   nodes,
   testResults,
   onInsert,
@@ -3164,6 +3165,35 @@ function HttpConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
   const headers = (cfg.headers as Record<string, string>) ?? {};
   const headerEntries = Object.entries(headers);
 
+  // Body type: 'none' | 'raw' | 'form-data' | 'urlencoded'
+  // Backward-compat: nodes without bodyType that have body → treat as 'raw'
+  const bodyType: string = (cfg.bodyType as string) ?? (cfg.body != null ? 'raw' : 'none');
+
+  // rawContentType maps 1:1 to BodyLanguage in HttpBodyEditor
+  const rawContentType: BodyLanguage = ((cfg.rawContentType as string) ?? 'json') as BodyLanguage;
+
+  const formData = (cfg.formData as Record<string, string>) ?? {};
+  const formDataEntries = Object.entries(formData);
+
+  // Auth
+  const authType: string = (cfg.authType as string) ?? 'none';
+  const auth = (cfg.auth as Record<string, string>) ?? {};
+
+  // Body is always stored as a raw string; objects from older saves are normalised
+  const bodyRaw: string =
+    cfg.body == null
+      ? ''
+      : typeof cfg.body === 'string'
+        ? cfg.body
+        : JSON.stringify(cfg.body, null, 2);
+
+  // JSON validation status for the editor badge
+  const jsonStatus: 'valid' | 'invalid' | 'empty' = useMemo(() => {
+    if (!bodyRaw.trim()) return 'empty';
+    try { JSON.parse(bodyRaw); return 'valid'; }
+    catch { return 'invalid'; }
+  }, [bodyRaw]);
+
   function updateHeader(oldKey: string, newKey: string, value: string) {
     const updated: Record<string, string> = {};
     for (const [k, v] of Object.entries(headers)) {
@@ -3182,6 +3212,63 @@ function HttpConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
     onChange({ headers: Object.keys(updated).length ? updated : undefined });
   }
 
+  function updateFormData(oldKey: string, newKey: string, value: string) {
+    const updated: Record<string, string> = {};
+    for (const [k, v] of Object.entries(formData)) {
+      updated[k === oldKey ? newKey : k] = k === oldKey ? value : v;
+    }
+    onChange({ formData: updated });
+  }
+
+  function addFormDataRow() {
+    onChange({ formData: { ...formData, '': '' } });
+  }
+
+  function removeFormDataRow(key: string) {
+    const updated = { ...formData };
+    delete updated[key];
+    onChange({ formData: Object.keys(updated).length ? updated : undefined });
+  }
+
+  function setBodyType(type: string) {
+    const extra: Record<string, unknown> = { bodyType: type };
+    if (type === 'none') {
+      extra.body = undefined;
+      extra.formData = undefined;
+    }
+    onChange(extra);
+  }
+
+  function updateAuth(key: string, value: string) {
+    onChange({ auth: { ...auth, [key]: value } });
+  }
+
+  function setAuthType(type: string) {
+    onChange({ authType: type, auth: {} });
+  }
+
+  function handleBodyChange(v: string) {
+    // Always store body as raw string — backend handles parsing
+    onChange({ body: v.trim() ? v : undefined });
+  }
+
+  function handlePrettify() {
+    if (!bodyRaw.trim()) return;
+    try {
+      const pretty = JSON.stringify(JSON.parse(bodyRaw), null, 2);
+      onChange({ body: pretty });
+    } catch {
+      // not valid JSON — do nothing
+    }
+  }
+
+  const BODY_TABS = [
+    { id: 'none', label: 'none' },
+    { id: 'raw', label: 'raw' },
+    { id: 'form-data', label: 'form-data' },
+    { id: 'urlencoded', label: 'x-www-form-urlencoded' },
+  ] as const;
+
   return (
     <>
       <Select
@@ -3199,6 +3286,74 @@ function HttpConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
         testResults={testResults}
       />
 
+      {/* Authorization */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">Authorization</label>
+          <select
+            value={authType}
+            onChange={(e) => setAuthType(e.target.value)}
+            className="flex-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="none">No Auth</option>
+            <option value="bearer">Bearer Token</option>
+            <option value="basic">Basic Auth</option>
+            <option value="apikey-header">API Key (Header)</option>
+            <option value="apikey-query">API Key (Query Param)</option>
+          </select>
+        </div>
+        {authType === 'bearer' && (
+          <ExpressionInput
+            label="Token"
+            value={auth.token ?? ''}
+            onChange={(v) => updateAuth('token', v)}
+            placeholder="Enter bearer token"
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+        )}
+        {authType === 'basic' && (
+          <>
+            <ExpressionInput
+              label="Username"
+              value={auth.username ?? ''}
+              onChange={(v) => updateAuth('username', v)}
+              placeholder="Username"
+              nodes={otherNodes}
+              testResults={testResults}
+            />
+            <ExpressionInput
+              label="Password"
+              value={auth.password ?? ''}
+              onChange={(v) => updateAuth('password', v)}
+              placeholder="Password"
+              nodes={otherNodes}
+              testResults={testResults}
+            />
+          </>
+        )}
+        {(authType === 'apikey-header' || authType === 'apikey-query') && (
+          <>
+            <ExpressionInput
+              label="Key"
+              value={auth.key ?? ''}
+              onChange={(v) => updateAuth('key', v)}
+              placeholder={authType === 'apikey-header' ? 'X-API-Key' : 'api_key'}
+              nodes={otherNodes}
+              testResults={testResults}
+            />
+            <ExpressionInput
+              label="Value"
+              value={auth.value ?? ''}
+              onChange={(v) => updateAuth('value', v)}
+              placeholder="Enter API key value"
+              nodes={otherNodes}
+              testResults={testResults}
+            />
+          </>
+        )}
+      </div>
+
       {/* Headers */}
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
@@ -3212,8 +3367,8 @@ function HttpConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
           </button>
         </div>
         {headerEntries.length === 0 && (
-          <p className="text-[10px] text-slate-600 italic">
-            No custom headers — Content-Type: application/json is sent by default.
+          <p className="text-[10px] text-slate-600 dark:text-slate-400 italic">
+            No custom headers — Content-Type and Authorization are managed above.
           </p>
         )}
         {headerEntries.map(([key, value], i) => (
@@ -3241,31 +3396,95 @@ function HttpConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
           </div>
         ))}
         {headerEntries.length > 0 && (
-          <p className="text-[10px] text-slate-600">
-            Custom headers are merged with Content-Type: application/json (your value overrides it if set).
+          <p className="text-[10px] text-slate-600 dark:text-slate-400">
+            Custom headers override auto-generated Content-Type and Authorization values.
           </p>
         )}
       </div>
 
-      <ExpressionTextArea
-        label="Body (JSON)"
-        rows={3}
-        value={
-          cfg.body == null
-            ? ''
-            : typeof cfg.body === 'string'
-              ? cfg.body
-              : JSON.stringify(cfg.body, null, 2)
-        }
-        onChange={(v) => {
-          if (!v.trim()) { onChange({ body: undefined }); return; }
-          try { onChange({ body: JSON.parse(v) }); }
-          catch { onChange({ body: v }); }
-        }}
-        placeholder='{"key": "value"}'
-        nodes={otherNodes}
-        testResults={testResults}
-      />
+      {/* Body */}
+      <div className="space-y-1.5">
+        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Body</label>
+
+        {/* Body type tabs */}
+        <div className="flex items-center border-b border-slate-200 dark:border-slate-700">
+          {BODY_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setBodyType(tab.id)}
+              className={`px-2.5 py-1 text-[10px] font-medium border-b-2 transition-colors -mb-px ${
+                bodyType === tab.id
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {bodyType === 'none' && (
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 italic">This request has no body.</p>
+        )}
+
+        {bodyType === 'raw' && (
+          <HttpBodyEditor
+            value={bodyRaw}
+            onChange={handleBodyChange}
+            language={rawContentType}
+            onLanguageChange={(lang) => onChange({ rawContentType: lang })}
+            onPrettify={handlePrettify}
+            jsonStatus={jsonStatus}
+            nodes={otherNodes}
+            testResults={testResults}
+          />
+        )}
+
+        {(bodyType === 'form-data' || bodyType === 'urlencoded') && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">
+                {bodyType === 'form-data' ? 'multipart/form-data' : 'application/x-www-form-urlencoded'}
+              </span>
+              <button
+                type="button"
+                onClick={addFormDataRow}
+                className="text-[10px] text-blue-500 dark:text-blue-400 hover:text-gray-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 px-1.5 py-0.5 rounded transition-colors"
+              >
+                + Add row
+              </button>
+            </div>
+            {formDataEntries.length === 0 && (
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 italic">No fields yet — click "+ Add row" to start.</p>
+            )}
+            {formDataEntries.map(([key, value], i) => (
+              <div key={i} className="flex items-center gap-1">
+                <input
+                  className="flex-1 min-w-0 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded px-2 py-1 text-xs placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  value={key}
+                  onChange={(e) => updateFormData(key, e.target.value, value)}
+                  placeholder="Key"
+                />
+                <span className="text-slate-600 dark:text-slate-400 text-xs shrink-0">:</span>
+                <input
+                  className="flex-1 min-w-0 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded px-2 py-1 text-xs placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  value={value}
+                  onChange={(e) => updateFormData(key, key, e.target.value)}
+                  placeholder="Value"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeFormDataRow(key)}
+                  className="text-slate-400 dark:text-slate-500 hover:text-red-400 px-1 shrink-0 text-sm"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </>
   );
 }
