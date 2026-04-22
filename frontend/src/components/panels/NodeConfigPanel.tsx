@@ -166,17 +166,17 @@ function ValuePreview({ value }: { value: unknown }) {
   if (Array.isArray(value)) {
     if (value.length === 0) return <NoDataBadge />;
     return (
-      <span className="text-slate-500 dark:text-slate-400">[{value.length} item{value.length !== 1 ? 's' : ''}]</span>
+      <span className="text-slate-600 dark:text-slate-400">[{value.length} item{value.length !== 1 ? 's' : ''}]</span>
     );
   }
   if (typeof value === 'object') {
     const keys = Object.keys(value as object);
     if (keys.length === 0) return <NoDataBadge />;
-    return <span className="text-slate-500 dark:text-slate-400">{'{'}{keys.slice(0, 2).join(', ')}{keys.length > 2 ? ', …' : ''}{'}'}</span>;
+    return <span className="text-slate-600 dark:text-slate-400">{'{'}{keys.slice(0, 2).join(', ')}{keys.length > 2 ? ', …' : ''}{'}'}</span>;
   }
   const str = String(value);
   return (
-    <span className="text-emerald-400 font-mono">
+    <span className="text-emerald-700 dark:text-emerald-400 font-mono">
       {str.length > 40 ? str.slice(0, 40) + '…' : str}
     </span>
   );
@@ -248,11 +248,11 @@ function resolveValue(
 function ExprToken({ nodeType, nodeName, field }: { nodeType: string; nodeName: string; field: string }) {
   return (
     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/60 border border-blue-300 dark:border-blue-700/50 text-[10px] font-medium mx-0.5 align-middle whitespace-nowrap">
-      <span className="text-blue-600 dark:text-blue-400 font-bold uppercase text-[9px]">{nodeTypeLabel(nodeType)}</span>
-      <span className="text-slate-400 dark:text-slate-500">·</span>
-      <span className="text-gray-800 dark:text-slate-200">{nodeName}</span>
-      <span className="text-slate-400 dark:text-slate-500">·</span>
-      <span className="font-mono text-blue-600 dark:text-blue-300">{field}</span>
+      <span className="text-blue-700 dark:text-blue-400 font-bold uppercase text-[9px]">{nodeTypeLabel(nodeType)}</span>
+      <span className="text-blue-400 dark:text-blue-600">·</span>
+      <span className="text-gray-900 dark:text-slate-200">{nodeName}</span>
+      <span className="text-blue-400 dark:text-blue-600">·</span>
+      <span className="font-mono text-blue-700 dark:text-blue-300">{field}</span>
     </span>
   );
 }
@@ -287,17 +287,17 @@ export function VariablePickerPanel({
   if (nodes.length === 0) return null;
 
   return (
-    <div className="mt-1 border border-blue-800/50 rounded-md overflow-hidden shadow-lg">
-      <div className="bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 border-b border-slate-200 dark:border-slate-700">
-        <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider">
+    <div className="mt-1 border border-blue-300 dark:border-blue-800/50 rounded-md overflow-hidden shadow-lg">
+      <div className="bg-blue-50 dark:bg-slate-800 px-2.5 py-1.5 border-b border-blue-200 dark:border-slate-700">
+        <p className="text-[10px] font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wider">
           Click a field to insert it
         </p>
-        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+        <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">
           Arrays &amp; objects can be expanded ▶ to insert individual values.
         </p>
       </div>
 
-      <div className="max-h-72 overflow-y-auto">
+      <div className="max-h-72 overflow-y-auto bg-white dark:bg-slate-900">
         {nodes.map((n) => {
           const testResult = testResults[n.id];
           const realOutput = testResult?.status === 'success' && testResult.output != null
@@ -323,24 +323,24 @@ export function VariablePickerPanel({
                 }));
 
           return (
-            <div key={n.id} className="px-2.5 py-2 border-b border-slate-800/60 last:border-0">
+            <div key={n.id} className="px-2.5 py-2 border-b border-slate-200 dark:border-slate-700/60 last:border-0">
               <div className="flex items-center gap-1.5 mb-1.5">
                 <span
                   className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                    n.data.nodeType === 'http'      ? 'bg-blue-400' :
-                    n.data.nodeType === 'llm'       ? 'bg-emerald-400' :
-                    n.data.nodeType === 'trigger'   ? 'bg-violet-400' :
-                    n.data.nodeType === 'transform' ? 'bg-cyan-400' :
-                    n.data.nodeType === 'condition' ? 'bg-amber-400' :
-                    n.data.nodeType === 'switch'    ? 'bg-orange-400' :
-                    'bg-rose-400'
+                    n.data.nodeType === 'http'      ? 'bg-blue-500' :
+                    n.data.nodeType === 'llm'       ? 'bg-emerald-500' :
+                    n.data.nodeType === 'trigger'   ? 'bg-violet-500' :
+                    n.data.nodeType === 'transform' ? 'bg-cyan-500' :
+                    n.data.nodeType === 'condition' ? 'bg-amber-500' :
+                    n.data.nodeType === 'switch'    ? 'bg-orange-500' :
+                    'bg-rose-500'
                   }`}
                 />
                 <span className="text-[11px] font-semibold text-gray-900 dark:text-white truncate">{n.data.label}</span>
-                <span className="text-[9px] text-slate-400 dark:text-slate-500 shrink-0">{n.data.nodeType}</span>
+                <span className="text-[9px] text-slate-500 dark:text-slate-500 shrink-0">{n.data.nodeType}</span>
                 {realOutput
-                  ? <span className="text-[9px] text-emerald-500 shrink-0 ml-auto">● live data</span>
-                  : <span className="text-[9px] text-slate-600 shrink-0 ml-auto italic">run or test to see real fields</span>
+                  ? <span className="text-[9px] text-emerald-600 dark:text-emerald-400 shrink-0 ml-auto font-medium">● live data</span>
+                  : <span className="text-[9px] text-slate-400 dark:text-slate-600 shrink-0 ml-auto italic">test node to see real fields</span>
                 }
               </div>
 
@@ -350,18 +350,18 @@ export function VariablePickerPanel({
                     <button
                       type="button"
                       onClick={() => onInsert(`{{nodes.${n.id}.YOUR_KEY}}`)}
-                      className="inline-flex items-center gap-1 text-[10px] bg-slate-200 dark:bg-slate-700 hover:bg-blue-700 text-emerald-600 dark:text-emerald-300 hover:text-white rounded px-1.5 py-0.5 font-mono transition-colors"
+                      className="inline-flex items-center gap-1 text-[10px] bg-slate-100 dark:bg-slate-700 hover:bg-blue-600 border border-slate-300 dark:border-slate-600 text-emerald-700 dark:text-emerald-300 hover:text-white hover:border-blue-600 rounded px-1.5 py-0.5 font-mono transition-colors"
                       title="Replace YOUR_KEY with your mapping key name"
                     >
                       .YOUR_KEY
                     </button>
-                    <span className="text-[10px] text-slate-400 dark:text-slate-500">← replace with your mapping key</span>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">← replace with your mapping key</span>
                   </div>
                 ) : fields.length === 0 ? (
                   <button
                     type="button"
                     onClick={() => onInsert(`{{nodes.${n.id}}}`)}
-                    className="text-[10px] bg-slate-200 dark:bg-slate-700 hover:bg-blue-700 text-emerald-600 dark:text-emerald-300 hover:text-white rounded px-1.5 py-0.5 font-mono transition-colors"
+                    className="text-[10px] bg-slate-100 dark:bg-slate-700 hover:bg-blue-600 border border-slate-300 dark:border-slate-600 text-emerald-700 dark:text-emerald-300 hover:text-white hover:border-blue-600 rounded px-1.5 py-0.5 font-mono transition-colors"
                   >
                     {`{{nodes.${n.id}}}`}
                   </button>
@@ -382,6 +382,10 @@ export function VariablePickerPanel({
                       : null;
                     const firstIsObj = firstItem !== null && typeof firstItem === 'object';
 
+                    // Shared chip class — readable in light AND dark mode
+                    const chipCls = 'inline-flex items-center gap-1 text-[10px] bg-slate-100 dark:bg-slate-700 hover:bg-blue-600 dark:hover:bg-blue-700 border border-slate-300 dark:border-slate-600 hover:border-blue-600 text-emerald-700 dark:text-emerald-300 hover:text-white rounded px-1.5 py-0.5 transition-colors font-mono';
+                    const chipValCls = 'font-sans text-slate-500 dark:text-slate-400 ml-0.5';
+
                     return (
                       <div key={f.key} className="space-y-0.5">
                         {/* Top-level field row */}
@@ -390,11 +394,11 @@ export function VariablePickerPanel({
                             type="button"
                             onClick={() => onInsert(`{{nodes.${n.id}.${f.key}}}`)}
                             title={`Insert: {{nodes.${n.id}.${f.key}}}`}
-                            className="inline-flex items-center gap-1 text-[10px] bg-slate-200 dark:bg-slate-700 hover:bg-blue-700 text-emerald-600 dark:text-emerald-300 hover:text-white rounded px-1.5 py-0.5 transition-colors font-mono"
+                            className={chipCls}
                           >
                             <span>.{f.key}</span>
                             {f.hasReal ? (
-                              <span className="font-sans text-slate-500 dark:text-slate-400 ml-0.5">
+                              <span className={chipValCls}>
                                 = <ValuePreview value={f.realValue} />
                               </span>
                             ) : (
@@ -407,7 +411,7 @@ export function VariablePickerPanel({
                             <button
                               type="button"
                               onClick={() => setExpanded((prev) => ({ ...prev, [expandKey]: !isOpen }))}
-                              className="inline-flex items-center gap-0.5 text-[9px] text-blue-400 hover:text-blue-300 px-1 py-0.5 rounded hover:bg-slate-700/60 transition-colors"
+                              className="inline-flex items-center gap-0.5 text-[9px] text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 px-1 py-0.5 rounded hover:bg-blue-50 dark:hover:bg-slate-700/60 transition-colors font-medium"
                               title={isOpen ? 'Collapse' : 'Expand to insert individual values'}
                             >
                               {isOpen
@@ -421,11 +425,11 @@ export function VariablePickerPanel({
 
                         {/* ── Expanded: array ── */}
                         {isOpen && isArr && (
-                          <div className="ml-2 pl-2 border-l-2 border-violet-700/40 space-y-0.5">
+                          <div className="ml-2 pl-2 border-l-2 border-violet-300 dark:border-violet-700/50 space-y-0.5">
                             {/* GSheets special view: column header → cell value */}
                             {isGSheetsAppEvent && f.key === 'items' && firstIsObj ? (
                               <>
-                                <p className="text-[9px] text-violet-400 font-semibold uppercase tracking-wider pt-0.5 pb-1">
+                                <p className="text-[9px] text-violet-700 dark:text-violet-400 font-semibold uppercase tracking-wider pt-0.5 pb-1">
                                   Row columns — click to insert
                                 </p>
                                 {Object.entries(firstItem as Record<string, unknown>).map(([col, val]) => (
@@ -434,10 +438,10 @@ export function VariablePickerPanel({
                                     type="button"
                                     onClick={() => onInsert(`{{nodes.${n.id}.items[0].${col}}}`)}
                                     title={`Insert: {{nodes.${n.id}.items[0].${col}}}`}
-                                    className="flex w-full items-center gap-1.5 text-[10px] bg-violet-900/20 hover:bg-blue-700 text-violet-200 hover:text-white rounded px-1.5 py-1 transition-colors"
+                                    className="flex w-full items-center gap-1.5 text-[10px] bg-violet-50 dark:bg-violet-900/25 hover:bg-blue-600 dark:hover:bg-blue-700 border border-violet-200 dark:border-violet-700/40 hover:border-blue-600 text-violet-800 dark:text-violet-200 hover:text-white rounded px-1.5 py-1 transition-colors"
                                   >
-                                    <span className="font-semibold text-violet-300 shrink-0 min-w-0 truncate">{col}</span>
-                                    <span className="text-slate-500 font-sans ml-auto shrink-0 pl-2">
+                                    <span className="font-semibold shrink-0 min-w-0 truncate">{col}</span>
+                                    <span className="text-slate-500 dark:text-slate-400 font-sans ml-auto shrink-0 pl-2">
                                       = <ValuePreview value={val} />
                                     </span>
                                   </button>
@@ -450,11 +454,11 @@ export function VariablePickerPanel({
                                   type="button"
                                   onClick={() => onInsert(`{{nodes.${n.id}.${f.key}[0]}}`)}
                                   title={`Insert: {{nodes.${n.id}.${f.key}[0]}}`}
-                                  className="inline-flex items-center gap-1 text-[10px] bg-slate-200 dark:bg-slate-700 hover:bg-blue-700 text-emerald-600 dark:text-emerald-300 hover:text-white rounded px-1.5 py-0.5 transition-colors font-mono"
+                                  className={chipCls}
                                 >
                                   .{f.key}[0]
                                   {firstItem !== null && (
-                                    <span className="font-sans text-slate-500 dark:text-slate-400 ml-0.5">
+                                    <span className={chipValCls}>
                                       = <ValuePreview value={firstItem} />
                                     </span>
                                   )}
@@ -469,10 +473,10 @@ export function VariablePickerPanel({
                                         type="button"
                                         onClick={() => onInsert(`{{nodes.${n.id}.${f.key}[0].${subKey}}}`)}
                                         title={`Insert: {{nodes.${n.id}.${f.key}[0].${subKey}}}`}
-                                        className="inline-flex items-center gap-1 text-[10px] bg-slate-200 dark:bg-slate-700 hover:bg-blue-700 text-emerald-600 dark:text-emerald-300 hover:text-white rounded px-1.5 py-0.5 transition-colors font-mono"
+                                        className={chipCls}
                                       >
                                         .{f.key}[0].{subKey}
-                                        <span className="font-sans text-slate-500 dark:text-slate-400 ml-0.5">
+                                        <span className={chipValCls}>
                                           = <ValuePreview value={subVal} />
                                         </span>
                                       </button>
@@ -486,17 +490,17 @@ export function VariablePickerPanel({
 
                         {/* ── Expanded: object sub-keys ── */}
                         {isOpen && isObj && (
-                          <div className="ml-2 pl-2 border-l-2 border-cyan-700/40 flex flex-wrap gap-1">
+                          <div className="ml-2 pl-2 border-l-2 border-cyan-300 dark:border-cyan-700/40 flex flex-wrap gap-1">
                             {Object.entries(f.realValue as Record<string, unknown>).map(([subKey, subVal]) => (
                               <button
                                 key={subKey}
                                 type="button"
                                 onClick={() => onInsert(`{{nodes.${n.id}.${f.key}.${subKey}}}`)}
                                 title={`Insert: {{nodes.${n.id}.${f.key}.${subKey}}}`}
-                                className="inline-flex items-center gap-1 text-[10px] bg-slate-200 dark:bg-slate-700 hover:bg-blue-700 text-emerald-600 dark:text-emerald-300 hover:text-white rounded px-1.5 py-0.5 transition-colors font-mono"
+                                className={chipCls}
                               >
                                 .{f.key}.{subKey}
-                                <span className="font-sans text-slate-500 dark:text-slate-400 ml-0.5">
+                                <span className={chipValCls}>
                                   = <ValuePreview value={subVal} />
                                 </span>
                               </button>
@@ -598,7 +602,7 @@ function ExpressionTextArea({
       {showDisplay && (
         <div
           onClick={() => { setFocused(true); requestAnimationFrame(() => ref.current?.focus()); }}
-          className="w-full flex flex-wrap items-start gap-y-1 content-start bg-slate-100 dark:bg-slate-800 border border-slate-600 hover:border-slate-500 rounded-md px-2.5 py-1.5 cursor-text"
+          className="w-full flex flex-wrap items-start gap-y-1 content-start bg-white dark:bg-slate-800 border border-blue-300 dark:border-blue-700/60 hover:border-blue-400 dark:hover:border-blue-600 rounded-md px-2.5 py-1.5 cursor-text shadow-sm"
           style={{ minHeight: `${rows * 20 + 12}px` }}
           title="Click to edit"
         >
@@ -688,7 +692,7 @@ function ExpressionInput({
       {showDisplay && (
         <div
           onClick={() => { setFocused(true); requestAnimationFrame(() => ref.current?.focus()); }}
-          className="w-full min-h-[30px] flex flex-wrap items-center gap-y-0.5 bg-slate-100 dark:bg-slate-800 border border-slate-600 hover:border-slate-500 rounded-md px-2.5 py-1.5 cursor-text"
+          className="w-full min-h-[30px] flex flex-wrap items-center gap-y-0.5 bg-white dark:bg-slate-800 border border-blue-300 dark:border-blue-700/60 hover:border-blue-400 dark:hover:border-blue-600 rounded-md px-2.5 py-1.5 cursor-text shadow-sm"
           title="Click to edit"
         >
           <DisplayValue value={value} nodes={nodes} placeholder={placeholder} />
