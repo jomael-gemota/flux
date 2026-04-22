@@ -12,6 +12,7 @@ interface TriggerNodeConfig {
     appType?: string;
     eventType?: string;
     credentialId?: string;
+    triggerMode?: 'polling' | 'instant';
     pollIntervalMinutes?: number;
     // basecamp
     projectId?: string;
@@ -87,6 +88,10 @@ export class PollingService {
                 if (n.type !== 'trigger') return false;
                 const cfg = n.config as unknown as TriggerNodeConfig;
                 return cfg.triggerType === 'app_event' || cfg.triggerType === 'email';
+                // Instant-mode nodes remain in polling as a 1-minute safety-net
+                // fallback. PushSubscriptionService handles native push registration
+                // for supported services (GDrive/GSheets/Basecamp) so those arrive
+                // near-instantly; the 1-min poll catches anything that slips through.
             })
             .map((n) => ({
                 workflowId,
@@ -110,12 +115,40 @@ export class PollingService {
         }
     }
 
+    /**
+     * Run the poll logic once for a specific trigger node.
+     * Used by PushSubscriptionService when a push notification arrives so the
+     * workflow fires immediately without waiting for the next polling cycle.
+     */
+    async pollOnce(workflowId: string, nodeId: string): Promise<void> {
+        const workflow = await this.workflowRepo.findById(workflowId);
+        if (!workflow) return;
+
+        const node = (workflow.nodes ?? []).find(
+            (n: { id: string; type: string }) => n.id === nodeId && n.type === 'trigger',
+        );
+        if (!node) return;
+
+        const pn: PollableNode = {
+            workflowId,
+            nodeId,
+            config: node.config as unknown as TriggerNodeConfig,
+        };
+        await this.poll(pn);
+    }
+
     private registerPollable(pn: PollableNode): void {
         const key = `${pn.workflowId}::${pn.nodeId}`;
         const existing = this.intervals.get(key);
         if (existing) clearInterval(existing);
 
-        const intervalMs = ((pn.config.pollIntervalMinutes ?? 5) * 60_000);
+        // Instant-mode nodes use a 1-minute interval as a reliable safety net.
+        // Native push subscriptions (GDrive/GSheets/Basecamp) will call pollOnce()
+        // immediately when the event fires, so in practice the lag is near-zero.
+        const intervalMs =
+            pn.config.triggerMode === 'instant'
+                ? 60_000
+                : (pn.config.pollIntervalMinutes ?? 5) * 60_000;
 
         // Run the first poll immediately, then set up the interval
         this.poll(pn).catch((err) =>
@@ -133,8 +166,32 @@ export class PollingService {
         this.intervals.set(key, interval);
     }
 
+    /**
+     * Build a short fingerprint of the config fields that, if changed,
+     * invalidate the stored poll cursor (lastSeenId).  Any change to these
+     * fields means the cursor is no longer meaningful for the new target.
+     */
+    private configFingerprint(cfg: TriggerNodeConfig): string {
+        return [
+            cfg.appType,
+            cfg.eventType,
+            cfg.credentialId,
+            cfg.spreadsheetId,
+            cfg.sheetName,
+            cfg.fileId,
+            cfg.folderId,
+            cfg.slackChannelId,
+            cfg.teamId,
+            cfg.channelId,
+            cfg.projectId,
+            cfg.todolistId,
+            cfg.labelFilter,
+        ].map((v) => v ?? '').join('|');
+    }
+
     private async poll(pn: PollableNode): Promise<void> {
         const key = `${pn.workflowId}::${pn.nodeId}`;
+        const fingerprint = this.configFingerprint(pn.config);
 
         // Load or create state
         let state = await TriggerStateModel.findOne({
@@ -147,9 +204,20 @@ export class PollingService {
                 nodeId: pn.nodeId,
                 lastPollAt: new Date(),
                 lastSeenId: '',
-                metadata: {},
+                metadata: { configFingerprint: fingerprint },
             });
             return; // First creation — skip triggering, start tracking from now
+        }
+
+        // If any key config field changed (e.g. new spreadsheet / file / channel),
+        // reset the cursor so we start tracking from now on the new target.
+        const storedFingerprint = (state.metadata as Record<string, unknown>).configFingerprint as string | undefined;
+        if (storedFingerprint !== fingerprint) {
+            await TriggerStateModel.updateOne(
+                { workflowId: pn.workflowId, nodeId: pn.nodeId },
+                { $set: { lastPollAt: new Date(), lastSeenId: '', metadata: { configFingerprint: fingerprint } } },
+            );
+            return; // Skip this cycle — next poll will track from now
         }
 
         const since = state.lastPollAt;
@@ -185,10 +253,10 @@ export class PollingService {
             }
         }
 
-        // Update state
+        // Update state (persist fingerprint so future polls can detect config changes)
         await TriggerStateModel.updateOne(
             { workflowId: pn.workflowId, nodeId: pn.nodeId },
-            { $set: { lastPollAt: new Date(), lastSeenId: newLastSeenId } },
+            { $set: { lastPollAt: new Date(), lastSeenId: newLastSeenId, 'metadata.configFingerprint': fingerprint } },
         );
     }
 
@@ -228,6 +296,26 @@ export class PollingService {
             'Content-Type': 'application/json',
         };
 
+        const sinceMs = since.getTime();
+
+        // ── Todo completed ───────────────────────────────────────────────
+        // Completed todos are filtered by updated_at (set when the todo is
+        // checked off) because Basecamp does not expose a dedicated
+        // completed_at timestamp in the list endpoint.
+        if (eventType === 'todo_completed' && todolistId) {
+            const url = `${baseUrl}/todolists/${todolistId}/todos.json?completed=true`;
+            const allItems = await this.fetchAllPages(url, headers);
+            const newItems = allItems.filter((item) => {
+                const updated = new Date((item.updated_at ?? item.created_at) as string).getTime();
+                return updated > sinceMs;
+            });
+            const newLastSeen = newItems.length > 0 ? String(newItems[0].id ?? lastSeenId) : lastSeenId;
+            return {
+                items: newItems.map((item) => ({ ...item, _eventType: 'todo_completed', _todolistId: todolistId })),
+                lastSeenId: newLastSeen,
+            };
+        }
+
         let url: string;
         if (eventType === 'new_todo' && todolistId) {
             url = `${baseUrl}/todolists/${todolistId}/todos.json`;
@@ -240,7 +328,6 @@ export class PollingService {
         }
 
         const allItems = await this.fetchAllPages(url, headers);
-        const sinceMs = since.getTime();
         const newItems = allItems.filter((item) => {
             const created = new Date(item.created_at as string).getTime();
             return created > sinceMs;
@@ -363,13 +450,28 @@ export class PollingService {
 
                 if (eventType === 'app_mention') {
                     if (botUserId && !(msg.text as string ?? '').includes(`<@${botUserId}>`)) continue;
+                    newItems.push({ ...msg, _channel: chId, _eventType: eventType });
                 } else if (eventType === 'reaction_added') {
-                    // Reactions appear as message subtypes or in reactions array
-                    const hasReactions = Array.isArray(msg.reactions) && (msg.reactions as unknown[]).length > 0;
-                    if (!hasReactions) continue;
+                    // Emit one item per reaction so each reaction is individually accessible.
+                    const reactions = Array.isArray(msg.reactions)
+                        ? (msg.reactions as Array<Record<string, unknown>>)
+                        : [];
+                    if (reactions.length === 0) continue;
+                    for (const reaction of reactions) {
+                        newItems.push({
+                            ...msg,
+                            _channel:       chId,
+                            _eventType:     'reaction_added',
+                            _reaction:      reaction,
+                            _reactionName:  reaction.name,
+                            _reactionCount: reaction.count,
+                            _reactionUsers: reaction.users,
+                        });
+                    }
+                } else {
+                    newItems.push({ ...msg, _channel: chId, _eventType: eventType });
                 }
 
-                newItems.push({ ...msg, _channel: chId, _eventType: eventType });
                 if (ts && ts > latestTs) latestTs = ts;
             }
         }
@@ -503,8 +605,15 @@ export class PollingService {
 
         // ── Changes to a specific file ───────────────────────────────────
         if (eventType === 'file_changed' && fileId) {
+            const fields = [
+                'id', 'name', 'mimeType', 'size', 'modifiedTime', 'createdTime', 'version',
+                'lastModifyingUser', 'owners', 'shared', 'sharingUser',
+                'webViewLink', 'webContentLink', 'iconLink',
+                'description', 'parents',
+                'capabilities', 'permissions',
+            ].join(',');
             const res = await fetch(
-                `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,modifiedTime,version,lastModifyingUser,mimeType,size`,
+                `https://www.googleapis.com/drive/v3/files/${fileId}?fields=${fields}&supportsAllDrives=true`,
                 { headers: authHdr },
             );
             if (!res.ok) return { items: [], lastSeenId };
@@ -513,7 +622,7 @@ export class PollingService {
             const currentVersion = String(file.version ?? '');
 
             if (modifiedTime && modifiedTime > since && currentVersion !== lastSeenId) {
-                return { items: [{ ...file, _eventType: 'file_changed' }], lastSeenId: currentVersion };
+                return { items: [{ ...file, _eventType: 'file_changed', _fileId: fileId }], lastSeenId: currentVersion };
             }
             return { items: [], lastSeenId: currentVersion || lastSeenId };
         }
@@ -522,8 +631,14 @@ export class PollingService {
         if (eventType === 'folder_changed' && folderId) {
             const sinceISO = since.toISOString();
             const query = encodeURIComponent(`'${folderId}' in parents and modifiedTime > '${sinceISO}' and trashed = false`);
+            const fileFields = [
+                'id', 'name', 'modifiedTime', 'createdTime', 'mimeType', 'size',
+                'lastModifyingUser', 'owners', 'shared', 'webViewLink', 'iconLink',
+            ].join(',');
             const res = await fetch(
-                `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,modifiedTime,mimeType,size,lastModifyingUser)&orderBy=modifiedTime+desc&pageSize=50`,
+                `https://www.googleapis.com/drive/v3/files?q=${query}` +
+                `&fields=files(${fileFields})&orderBy=modifiedTime+desc&pageSize=50` +
+                `&supportsAllDrives=true&includeItemsFromAllDrives=true`,
                 { headers: authHdr },
             );
             if (!res.ok) return { items: [], lastSeenId };
@@ -588,8 +703,14 @@ export class PollingService {
             return { items: [], lastSeenId: newStateId };
         }
 
+        const resolvedSheetName = sheetName || 'Sheet1';
         const mapRow = (row: string[], index: number, label: string): Record<string, unknown> => {
-            const obj: Record<string, unknown> = { _rowIndex: index + 2, _eventType: label };
+            const obj: Record<string, unknown> = {
+                _rowIndex:      index + 2,
+                _eventType:     label,
+                _spreadsheetId: spreadsheetId,
+                _sheetName:     resolvedSheetName,
+            };
             headers.forEach((h, j) => { obj[h || `col${j + 1}`] = row[j] ?? ''; });
             return obj;
         };

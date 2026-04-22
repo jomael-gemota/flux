@@ -11,6 +11,7 @@ import { WorkflowRepository } from '../repositories/WorkflowRepository';
 import { ExecutionRepository } from '../repositories/ExecutionRepository';
 import { NodeExecutorRegistry } from '../engine/NodeExecutorRegistry';
 import { WorkflowScheduler } from '../scheduler/WorkflowScheduler';
+import { TriggerTestService } from '../services/TriggerTestService';
 import {
     TriggerWorkflowSchema,
     CreateWorkflowSchema,
@@ -32,9 +33,10 @@ export async function workflowRoutes(
         registry: NodeExecutorRegistry;
         scheduler?: WorkflowScheduler;
         onWorkflowUpdated?: (workflowId: string) => Promise<void>;
+        triggerTestService?: TriggerTestService;
     }
 ): Promise<void> {
-    const { workflowService, workflowRepo, executionRepo, registry, scheduler, onWorkflowUpdated } = options;
+    const { workflowService, workflowRepo, executionRepo, registry, scheduler, onWorkflowUpdated, triggerTestService } = options;
 
     fastify.post(
         '/workflows',
@@ -197,10 +199,18 @@ export async function workflowRoutes(
                 }
             }
 
+            // For trigger nodes configured as app_event, fetch a real live sample
+            // from the source so the test output contains actual data fields.
+            let triggerSample: Record<string, unknown> = {};
+            if (node.type === 'trigger' && triggerTestService) {
+                const cfg = (node.config ?? {}) as Record<string, unknown>;
+                triggerSample = await triggerTestService.fetchLatestSample(cfg as any).catch(() => ({}));
+            }
+
             const execContext: ExecutionContext = {
                 workflowId: workflow.id,
                 executionId: crypto.randomUUID(),
-                variables: { ...injectedVars, ...(context ?? {}) },
+                variables: { ...injectedVars, ...(context ?? {}), input: triggerSample },
                 startedAt: new Date(),
             };
 
@@ -296,6 +306,25 @@ export async function workflowRoutes(
             if (!workflow) throw NotFoundError(`Workflow ${request.params.id}`);
 
             const results = await executionRepo.findAllNodeTestResults(request.params.id);
+            return reply.code(200).send(results);
+        }
+    );
+
+    /**
+     * GET /workflows/:id/last-run-results
+     * Returns per-node outputs from the most recent successful full execution
+     * (not node-test or step-run).  Same shape as /node-test-results so the
+     * frontend can merge them into the variable-picker transparently.
+     */
+    fastify.get<{ Params: { id: string } }>(
+        '/workflows/:id/last-run-results',
+        { preHandler: apiKeyAuth },
+        async (request, reply) => {
+            const userId = getRequestUserId(request);
+            const workflow = await workflowRepo.findById(request.params.id, userId);
+            if (!workflow) throw NotFoundError(`Workflow ${request.params.id}`);
+
+            const results = await executionRepo.findLastRunResults(request.params.id);
             return reply.code(200).send(results);
         }
     );

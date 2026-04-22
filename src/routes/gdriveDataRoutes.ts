@@ -12,6 +12,8 @@ export async function gdriveDataRoutes(
      * GET /gdrive/items?credentialId=xxx&folderId=xxx&type=folders|files|all
      * Lists files/folders inside a given Drive folder for the UI browser.
      * folderId defaults to 'root' (My Drive).
+     * At root level, shared drives are prepended as top-level folders so the
+     * user can navigate into them exactly like any other folder.
      */
     fastify.get<{ Querystring: { credentialId: string; folderId?: string; type?: string } }>(
         '/gdrive/items',
@@ -39,7 +41,30 @@ export async function gdriveDataRoutes(
                 supportsAllDrives: true,
             });
 
-            return reply.send({ items: res.data.files ?? [] });
+            let items: Array<Record<string, unknown>> = (res.data.files ?? []) as Array<Record<string, unknown>>;
+
+            // At root level, prepend shared drives as browsable top-level folders.
+            // We skip this when the caller only wants files (shared drives are not files).
+            if (parentId === 'root' && type !== 'files') {
+                try {
+                    const drivesRes = await drive.drives.list({
+                        pageSize: 100,
+                        fields: 'drives(id,name)',
+                    });
+                    const sharedDrives: Array<Record<string, unknown>> = (drivesRes.data.drives ?? []).map((d) => ({
+                        id:            d.id,
+                        name:          d.name,
+                        mimeType:      'application/vnd.google-apps.folder',
+                        _isSharedDrive: true,
+                    }));
+                    // Shared drives appear before My Drive items so they are easy to find
+                    items = [...sharedDrives, ...items];
+                } catch {
+                    // Shared Drives API unavailable for this credential — silently skip
+                }
+            }
+
+            return reply.send({ items });
         }
     );
 

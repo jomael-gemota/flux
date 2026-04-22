@@ -4,7 +4,7 @@ import { HttpBodyEditor, type BodyLanguage } from './HttpBodyEditor';
 import { useWorkflowStore } from '../../store/workflowStore';
 import type { CanvasNode } from '../../store/workflowStore';
 import { Select } from '../ui/Input';
-import { useTestNode, useNodeTestResults } from '../../hooks/useNodeTest';
+import { useTestNode, useNodeTestResults, useLastRunResults } from '../../hooks/useNodeTest';
 import type { NodeTestResult } from '../../types/workflow';
 import { useCredentialList } from '../../hooks/useCredentials';
 import { ConfirmModal } from '../ui/ConfirmModal';
@@ -27,12 +27,18 @@ interface OutputField {
 
 const NODE_OUTPUT_FIELDS: Record<string, OutputField[]> = {
   trigger: [
-    { key: 'triggerType', label: 'Trigger type (manual/webhook/cron/…)' },
-    { key: 'triggeredAt', label: 'Trigger timestamp (ISO)' },
-    { key: 'body', label: 'Request body (webhook)' },
-    { key: 'headers', label: 'Request headers (webhook)' },
-    { key: 'query', label: 'Query params (webhook)' },
-    { key: 'scheduledAt', label: 'Scheduled time (cron)' },
+    { key: 'triggerType',  label: 'Trigger type (manual/webhook/cron/app_event)' },
+    { key: 'triggeredAt',  label: 'Trigger timestamp (ISO)' },
+    // webhook
+    { key: 'body',         label: 'Request body (webhook)' },
+    { key: 'headers',      label: 'Request headers (webhook)' },
+    { key: 'query',        label: 'Query params (webhook)' },
+    // cron
+    { key: 'scheduledAt',  label: 'Scheduled time (cron)' },
+    // app event (all app types)
+    { key: 'items',        label: 'Triggered event items array (app event)' },
+    { key: 'count',        label: 'Number of triggered items (app event)' },
+    { key: 'polledAt',     label: 'Poll timestamp ISO (app event)' },
   ],
   http: [
     { key: 'status', label: 'HTTP status code' },
@@ -116,12 +122,31 @@ const NODE_OUTPUT_FIELDS: Record<string, OutputField[]> = {
     { key: 'fieldsApplied',  label: 'Format fields applied (format_cells)' },
   ],
   basecamp: [
-    { key: 'id', label: 'Created/matched resource ID' },
-    { key: 'title', label: 'To-do title (create)' },
-    { key: 'status', label: 'Action status (created/posted/sent)' },
+    { key: 'id',        label: 'Created/matched resource ID' },
+    { key: 'title',     label: 'To-do title (create)' },
+    { key: 'status',    label: 'Action status (created/posted/sent)' },
     { key: 'completed', label: 'Completion flag (complete/uncomplete)' },
-    { key: 'todos', label: 'To-do list (list_todos)' },
-    { key: 'count', label: 'To-do count (list_todos)' },
+    { key: 'todos',     label: 'To-do list (list_todos)' },
+    { key: 'count',     label: 'To-do count (list_todos)' },
+  ],
+  slack: [
+    { key: 'ok',        label: 'Slack API success flag' },
+    { key: 'messageId', label: 'Message timestamp / ID (send)' },
+    { key: 'channelId', label: 'Channel ID (send)' },
+    { key: 'messages',  label: 'Message list (list_messages)' },
+    { key: 'users',     label: 'User list (list_users)' },
+    { key: 'channels',  label: 'Channel list (list_channels)' },
+    { key: 'files',     label: 'File list (list_files)' },
+    { key: 'total',     label: 'Total items returned' },
+  ],
+  teams: [
+    { key: 'id',       label: 'Message / resource ID' },
+    { key: 'status',   label: 'Operation status' },
+    { key: 'messages', label: 'Message list' },
+    { key: 'members',  label: 'Member list' },
+    { key: 'channels', label: 'Channel list' },
+    { key: 'chats',    label: 'Chat list' },
+    { key: 'total',    label: 'Total items returned' },
   ],
 };
 
@@ -308,10 +333,10 @@ export function VariablePickerPanel({
                 <span className="text-[11px] font-semibold text-gray-900 dark:text-white truncate">{n.data.label}</span>
                 <span className="text-[9px] text-slate-400 dark:text-slate-500 shrink-0">{n.data.nodeType}</span>
                 {realOutput && (
-                  <span className="text-[9px] text-emerald-500 shrink-0 ml-auto">● tested</span>
+                  <span className="text-[9px] text-emerald-500 shrink-0 ml-auto">● live data</span>
                 )}
                 {!realOutput && (
-                  <span className="text-[9px] text-slate-600 shrink-0 ml-auto italic">test to see real fields</span>
+                  <span className="text-[9px] text-slate-600 shrink-0 ml-auto italic">run or test to see real fields</span>
                 )}
               </div>
 
@@ -2761,9 +2786,14 @@ export function NodeConfigPanel() {
   });
 
   const isUnsaved = !activeWorkflow?.id || activeWorkflow.id.startsWith('__new__');
-  const { data: testResults = {} } = useNodeTestResults(
-    isUnsaved ? null : activeWorkflow?.id
-  );
+  const workflowIdForQueries = isUnsaved ? null : activeWorkflow?.id;
+  const { data: rawTestResults = {} }    = useNodeTestResults(workflowIdForQueries);
+  const { data: lastRunResults  = {} }   = useLastRunResults(workflowIdForQueries);
+
+  // Merge: last-run results are the base; manual test results override them.
+  // This way the variable picker shows real output from either source, with
+  // the most-intentional (manual test) taking precedence when both exist.
+  const testResults: Record<string, NodeTestResult> = { ...lastRunResults, ...rawTestResults };
 
   // ── isDirtyLocal must be declared BEFORE the early return so hook order is stable ──
   // Depends on both `draft` AND `originalSnapshot` so it recomputes when either changes.
@@ -8976,15 +9006,19 @@ function TriggerConfig({
   const eventType     = (cfg.eventType     as string) || '';
   const spreadsheetId = (cfg.spreadsheetId as string) || '';
   const teamId        = (cfg.teamId        as string) || '';
+  const projectId     = (cfg.projectId     as string) || '';
+  const todolistId    = (cfg.todolistId    as string) || '';
 
   const credentials = useCredentialList();
 
   // Data hooks — always called (hooks can't be conditional), but each
   // passes '' when not applicable so React Query keeps them disabled.
-  const slackChs    = useSlackChannels(appType === 'slack'  ? credentialId : '');
-  const teamsTeams  = useTeamsTeams   (appType === 'teams'  ? credentialId : '');
-  const teamsChans  = useTeamsChannels(appType === 'teams'  ? credentialId : '', teamId);
-  const gsheetsTabs = useGSheetsSheets(appType === 'gsheets' ? credentialId : '', spreadsheetId);
+  const slackChs    = useSlackChannels(appType === 'slack'     ? credentialId : '');
+  const teamsTeams  = useTeamsTeams   (appType === 'teams'     ? credentialId : '');
+  const teamsChans  = useTeamsChannels(appType === 'teams'     ? credentialId : '', teamId);
+  const gsheetsTabs = useGSheetsSheets(appType === 'gsheets'   ? credentialId : '', spreadsheetId);
+  const bcProjects  = useBasecampProjects (appType === 'basecamp' ? credentialId : '');
+  const bcTodolists = useBasecampTodolists(appType === 'basecamp' ? credentialId : '', projectId);
 
   const baseUrl    = typeof window !== 'undefined' ? window.location.origin : '';
   const webhookUrl = workflowId && nodeId ? `${baseUrl}/webhooks/${workflowId}/trigger/${nodeId}` : '';
@@ -9009,16 +9043,19 @@ function TriggerConfig({
     eventType: '', credentialId: '', fileId: '', fileIdPath: '', folderId: '', folderIdPath: '',
     spreadsheetId: '', spreadsheetPath: '', spreadsheetName: '', owner: '', searchFolderId: '',
     searchFolderPath: '', sheetName: '', teamId: '', channelId: '', slackChannelId: '',
+    projectId: '', todolistId: '',
   };
   const resetCredFields = {
     eventType: '', fileId: '', fileIdPath: '', folderId: '', folderIdPath: '',
     spreadsheetId: '', spreadsheetPath: '', spreadsheetName: '', owner: '', searchFolderId: '',
     searchFolderPath: '', sheetName: '', teamId: '', channelId: '', slackChannelId: '',
+    projectId: '', todolistId: '',
   };
   const resetEventFields = {
     fileId: '', fileIdPath: '', folderId: '', folderIdPath: '',
     spreadsheetId: '', spreadsheetPath: '', spreadsheetName: '', owner: '', searchFolderId: '',
     searchFolderPath: '', sheetName: '', teamId: '', channelId: '', slackChannelId: '',
+    projectId: '', todolistId: '',
   };
 
   // Shared: Teams team button-list item row
@@ -9255,14 +9292,151 @@ function TriggerConfig({
                 />
               )}
 
-              {/* Step 5 — Poll interval */}
-              <div className="space-y-1">
-                <label className={labelCls}>Poll Interval (minutes)</label>
-                <input type="number" min={1} max={1440} value={(cfg.pollIntervalMinutes as number) || 5}
-                  onChange={(e) => onChange({ pollIntervalMinutes: Number(e.target.value) })}
-                  className={inputCls}
-                />
-              </div>
+              {/* ── Basecamp — project + to-do list pickers ── */}
+              {appType === 'basecamp' && (
+                <>
+                  {/* Project picker — always shown for Basecamp events */}
+                  <div className="space-y-1">
+                    <span className={labelCls}>Project</span>
+                    {bcProjects.isLoading ? (
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-slate-500 py-1">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Loading projects…
+                      </div>
+                    ) : bcProjects.isError ? (
+                      <p className="text-[10px] text-red-400">Failed to load projects.</p>
+                    ) : (
+                      <div className="max-h-36 overflow-y-auto rounded-md border border-slate-600 bg-slate-100 dark:bg-slate-800 divide-y divide-slate-700">
+                        {(bcProjects.data ?? []).length === 0 && (
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500 px-2.5 py-2">No projects found.</p>
+                        )}
+                        {(bcProjects.data ?? []).map((p) => (
+                          <button key={p.id} type="button"
+                            onClick={() => onChange({ projectId: String(p.id), todolistId: '' })}
+                            className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors ${
+                              String(p.id) === projectId
+                                ? 'bg-green-600/30 text-green-300'
+                                : 'text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            }`}>
+                            {p.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {Boolean(projectId) && (bcProjects.data ?? []).length > 0 && (
+                      <p className={hintCls}>Selected: <span className="text-slate-700 dark:text-slate-300">{(bcProjects.data ?? []).find((p) => String(p.id) === projectId)?.name ?? projectId}</span></p>
+                    )}
+                  </div>
+
+                  {/* To-Do List picker — shown only for events that need it */}
+                  {(eventType === 'new_todo' || eventType === 'todo_completed') && Boolean(projectId) && (
+                    <div className="space-y-1">
+                      <span className={labelCls}>To-Do List</span>
+                      {bcTodolists.isLoading ? (
+                        <div className="flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-slate-500 py-1">
+                          <Loader2 className="w-3 h-3 animate-spin" /> Loading to-do lists…
+                        </div>
+                      ) : bcTodolists.isError ? (
+                        <p className="text-[10px] text-red-400">Failed to load to-do lists.</p>
+                      ) : (
+                        <div className="max-h-36 overflow-y-auto rounded-md border border-slate-600 bg-slate-100 dark:bg-slate-800 divide-y divide-slate-700">
+                          {(bcTodolists.data ?? []).length === 0 && (
+                            <p className="text-[10px] text-slate-400 dark:text-slate-500 px-2.5 py-2">No to-do lists found.</p>
+                          )}
+                          {(bcTodolists.data ?? []).map((tl) => (
+                            <button key={tl.id} type="button"
+                              onClick={() => onChange({ todolistId: String(tl.id) })}
+                              className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors ${
+                                String(tl.id) === todolistId
+                                  ? 'bg-green-600/30 text-green-300'
+                                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                              }`}>
+                              {tl.name}
+                              {tl.todosRemaining > 0 && (
+                                <span className="ml-1.5 text-[10px] text-slate-400 dark:text-slate-500">({tl.todosRemaining} remaining)</span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {Boolean(todolistId) && (bcTodolists.data ?? []).length > 0 && (
+                        <p className={hintCls}>Selected: <span className="text-slate-700 dark:text-slate-300">{(bcTodolists.data ?? []).find((tl) => String(tl.id) === todolistId)?.name ?? todolistId}</span></p>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Step 5 — Trigger mode: Polling vs Instant */}
+              {(() => {
+                const mode = (cfg.triggerMode as 'polling' | 'instant') || 'polling';
+
+                return (
+                  <div className="space-y-3">
+                    {/* Mode selector */}
+                    <div className="space-y-1">
+                      <span className={labelCls}>Trigger Mode</span>
+                      <div className="flex gap-2">
+                        {(['polling', 'instant'] as const).map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => onChange({ triggerMode: m })}
+                            className={`flex-1 py-1.5 px-3 rounded-md text-xs font-medium border transition-colors ${
+                              mode === m
+                                ? 'bg-violet-600 border-violet-500 text-white'
+                                : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:border-violet-400'
+                            }`}
+                          >
+                            {m === 'polling' ? '⏱ Polling' : '⚡ Instant'}
+                          </button>
+                        ))}
+                      </div>
+                      <p className={hintCls}>
+                        {mode === 'polling'
+                          ? 'Your server checks for new events on a fixed interval. Events may be delayed up to the interval length.'
+                          : 'Events trigger the workflow immediately — no manual setup required. The platform auto-registers the connection when you save.'}
+                      </p>
+                    </div>
+
+                    {/* Polling — check interval */}
+                    {mode === 'polling' && (
+                      <div className="space-y-1">
+                        <label className={labelCls}>
+                          Check Interval (minutes)
+                          <span className="ml-1 font-normal text-slate-400 dark:text-slate-500 normal-case">
+                            — how often to poll for new events
+                          </span>
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={1440}
+                          value={(cfg.pollIntervalMinutes as number) || 5}
+                          onChange={(e) => onChange({ pollIntervalMinutes: Math.max(1, Number(e.target.value)) })}
+                          className={inputCls}
+                        />
+                        <p className={hintCls}>
+                          The workflow only runs when a matching event is detected — not on every check. Default: 5 min.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Instant — fully automatic, no user setup needed */}
+                    {mode === 'instant' && (() => {
+                      const nativePush = new Set(['gsheets', 'gdrive', 'basecamp']);
+                      const hasNative  = nativePush.has(cfg.appType as string);
+                      const appLabel   = cfg.appType === 'gsheets' ? 'Google Sheets'
+                                       : cfg.appType === 'gdrive'   ? 'Google Drive'
+                                       : cfg.appType === 'basecamp' ? 'Basecamp'
+                                       : cfg.appType === 'slack'    ? 'Slack'
+                                       : cfg.appType === 'teams'    ? 'Teams'
+                                       : 'the app';
+
+                      return null;
+                    })()}
+                  </div>
+                );
+              })()}
             </>
           )}
         </div>

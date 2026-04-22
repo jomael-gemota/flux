@@ -158,6 +158,13 @@ export function getNodeTestResults(workflowId: string) {
   );
 }
 
+/** Returns per-node outputs from the most recent successful full workflow run. */
+export function getLastRunResults(workflowId: string) {
+  return request<Record<string, NodeTestResult>>(
+    `/workflows/${workflowId}/last-run-results`
+  );
+}
+
 /** Execute a single node as a permanent, append-only run stored in the execution log. */
 export function runNode(workflowId: string, nodeId: string) {
   return request<ExecutionSummary>(

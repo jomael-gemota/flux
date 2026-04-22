@@ -27,10 +27,13 @@ export async function gsheetsDataRoutes(
 
             do {
                 const res = await drive.files.list({
-                    q:         "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
-                    pageSize:  200,
-                    fields:    'nextPageToken,files(id,name,modifiedTime)',
-                    orderBy:   'modifiedTime desc',
+                    q:                        "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
+                    pageSize:                 200,
+                    fields:                   'nextPageToken,files(id,name,modifiedTime)',
+                    orderBy:                  'modifiedTime desc',
+                    includeItemsFromAllDrives: true,
+                    supportsAllDrives:         true,
+                    corpora:                  'allDrives',
                     ...(pageToken ? { pageToken } : {}),
                 });
 

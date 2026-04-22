@@ -68,6 +68,9 @@ import { ApiKeyModel } from './db/models/ApiKeyModel';
 import { createWorkflowWorker } from './queue/WorkflowWorker';
 import { WorkflowScheduler } from './scheduler/WorkflowScheduler';
 import { PollingService } from './services/PollingService';
+import { PushSubscriptionService } from './services/PushSubscriptionService';
+import { TriggerTestService } from './services/TriggerTestService';
+import { pushNotificationRoutes } from './routes/pushNotificationRoutes';
 
 async function bootstrap() {
 
@@ -125,6 +128,20 @@ async function bootstrap() {
     );
     await pollingService.start();
 
+    const pushSubscriptionService = new PushSubscriptionService(
+        workflowRepo, googleAuth, basecampAuth,
+    );
+
+    // Hourly cron: renew Google Drive push subscriptions that are about to expire
+    setInterval(
+        () => pushSubscriptionService.renewExpiring().catch((err) =>
+            console.error('[PushSubscriptionService] renewal cron error:', err)
+        ),
+        60 * 60 * 1000, // every hour
+    );
+
+    const triggerTestService = new TriggerTestService(googleAuth, slackAuth, teamsAuth, basecampAuth);
+
     // 3. Seed a default API key on first run if none exist
     const existingKey = await ApiKeyModel.findOne();
     if (!existingKey) {
@@ -165,7 +182,13 @@ async function bootstrap() {
 	registerErrorHandler(fastify);
     await fastify.register(workflowRoutes,   {
         prefix: '/api', workflowService, workflowRepo, executionRepo, registry, scheduler,
-        onWorkflowUpdated: async (wfId: string) => { await pollingService.refresh(wfId); },
+        triggerTestService,
+        onWorkflowUpdated: async (wfId: string) => {
+            await pollingService.refresh(wfId);
+            await pushSubscriptionService.syncWorkflow(wfId).catch((err) =>
+                console.error('[PushSubscriptionService] syncWorkflow error:', err)
+            );
+        },
     });
     await fastify.register(executionRoutes,  { prefix: '/api', executionRepo, workflowService });
     await fastify.register(webhookRoutes,    { workflowService, workflowRepo });   // no prefix — called by external systems
@@ -184,6 +207,8 @@ async function bootstrap() {
     await fastify.register(authRoutes,  { prefix: '/api', userAuth });
     await fastify.register(adminRoutes,      { prefix: '/api' });
     await fastify.register(surveillanceRoutes, { prefix: '/api', scheduler });
+    // Push notification ingress — no /api prefix; called directly by external services
+    await fastify.register(pushNotificationRoutes, { pollingService, pushSubscriptionService });
 
     // 6. Health check
     fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));

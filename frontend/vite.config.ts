@@ -13,6 +13,10 @@ export default defineConfig({
         proxyTimeout: 60_000,
         timeout: 60_000,
       },
+      '/webhooks': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
     },
   },
 });

@@ -17,6 +17,8 @@ interface TriggerConfig {
     appType?: 'basecamp' | 'slack' | 'teams' | 'gmail' | 'gdrive' | 'gsheets';
     eventType?: string;
     credentialId?: string;
+    /** 'polling' (default) = periodic pull; 'instant' = external webhook push */
+    triggerMode?: 'polling' | 'instant';
     pollIntervalMinutes?: number;
     // basecamp
     projectId?: string;

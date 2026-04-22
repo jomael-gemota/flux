@@ -171,6 +171,41 @@ export class ExecutionRepository {
         return map;
     }
 
+    /**
+     * Returns the node outputs from the most recent successful full workflow
+     * execution (excludes node-test and step-run entries so only real runs
+     * are considered).  The returned map has the same shape as
+     * `findAllNodeTestResults` so callers can merge both transparently.
+     */
+    async findLastRunResults(
+        workflowId: string
+    ): Promise<Record<string, NodeTestResult>> {
+        const doc = await ExecutionModel.findOne({
+            workflowId,
+            status: 'success',
+            triggeredBy: { $nin: ['node-test', 'step-run'] },
+        }).sort({ startedAt: -1 });
+
+        if (!doc) return {};
+
+        const map: Record<string, NodeTestResult> = {};
+        const ranAt = doc.completedAt ?? doc.startedAt;
+
+        for (const result of (doc.results as NodeResult[])) {
+            // 'skipped' nodes have no useful output — omit them from the map
+            if (result.status === 'skipped') continue;
+            map[result.nodeId] = {
+                nodeId:    result.nodeId,
+                status:    result.status as 'success' | 'failure',
+                output:    result.output,
+                error:     result.error,
+                durationMs: result.durationMs,
+                ranAt,
+            };
+        }
+        return map;
+    }
+
     async createStepRun(
         executionId: string,
         workflowId: string,

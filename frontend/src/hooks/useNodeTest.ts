@@ -11,6 +11,20 @@ export function useNodeTestResults(workflowId: string | null | undefined) {
   });
 }
 
+/**
+ * Returns per-node outputs from the most recent successful full workflow run.
+ * Used alongside `useNodeTestResults` to populate the variable picker even
+ * when nodes haven't been individually tested.
+ */
+export function useLastRunResults(workflowId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['last-run-results', workflowId],
+    queryFn: () => api.getLastRunResults(workflowId!),
+    enabled: !!workflowId && !workflowId.startsWith('__new__'),
+    staleTime: 0,
+  });
+}
+
 export function useTestNode() {
   const qc = useQueryClient();
   return useMutation({
@@ -39,6 +53,9 @@ export function useRunNode() {
       api.runNode(workflowId, nodeId),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['executions', vars.workflowId] });
+      // Step-run output is stored as a full execution so refresh the run-results
+      // cache so the variable picker immediately shows the updated output.
+      qc.invalidateQueries({ queryKey: ['last-run-results', vars.workflowId] });
     },
   });
 }

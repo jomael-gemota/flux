@@ -109,6 +109,9 @@ export function useTriggerWorkflow() {
     }) => api.triggerWorkflow(workflowId, input),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['executions', vars.workflowId] });
+      // After a full run the last-run-results cache should reflect new node outputs
+      // so the variable picker immediately shows real values.
+      qc.invalidateQueries({ queryKey: ['last-run-results', vars.workflowId] });
     },
   });
 }
