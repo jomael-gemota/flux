@@ -34,6 +34,21 @@ export class ExecutionRepository {
         });
     }
 
+    async appendNodeResult(executionId: string, result: NodeResult): Promise<void> {
+        const logEntry = {
+            nodeId: result.nodeId,
+            status: result.status,
+            output: result.output,
+            error: result.error,
+            durationMs: result.durationMs,
+            executedAt: new Date(),
+        };
+        await ExecutionModel.updateOne(
+            { executionId },
+            { $push: { results: result, logs: logEntry } }
+        );
+    }
+
     async markRunning(executionId: string): Promise<void> {
         await ExecutionModel.updateOne(
             { executionId },

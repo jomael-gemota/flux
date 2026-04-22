@@ -5,6 +5,7 @@ import { ExecutionRepository } from '../repositories/ExecutionRepository';
 import { ExecutionSummary } from '../types/api.types';
 import { NodeResult } from '../types/workflow.types';
 import { getWorkflowQueue } from '../queue/WorkflowQueue';
+import { executionEventBus } from '../events/ExecutionEventBus';
 
 export class WorkflowService {
     constructor(
@@ -58,7 +59,10 @@ export class WorkflowService {
         await this.executionRepo.markRunning(executionId);
 
         try {
-            const result = await this.runner.run(workflow, input, triggerNodeId);
+            const result = await this.runner.run(workflow, input, triggerNodeId, (nodeResult) => {
+                executionEventBus.emitNodeResult(executionId, nodeResult);
+                this.executionRepo.appendNodeResult(executionId, nodeResult).catch(() => {});
+            });
             const completedAt = new Date();
 
             const hasFailure = result.results.some(r => r.status === 'failure');
@@ -66,6 +70,7 @@ export class WorkflowService {
             const finalStatus: 'success' | 'partial' | 'failure' =
                 hasFailure && hasSuccess ? 'partial' : hasFailure ? 'failure' : 'success';
 
+            executionEventBus.emitComplete({ executionId, workflowId, status: finalStatus });
             await this.executionRepo.complete(executionId, finalStatus, result.results);
 
             return {
@@ -85,6 +90,8 @@ export class WorkflowService {
                 error: message,
                 durationMs: Date.now() - startedAt.getTime(),
             };
+            executionEventBus.emitNodeResult(executionId, syntheticResult);
+            executionEventBus.emitComplete({ executionId, workflowId, status: 'failure' });
             await this.executionRepo.complete(executionId, 'failure', [syntheticResult]);
             return {
                 executionId,

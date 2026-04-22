@@ -12,6 +12,7 @@ export class WorkflowRunner {
         workflow: WorkflowDefinition,
         input: unknown,
         triggerNodeId?: string,
+        onNodeResult?: (result: NodeResult) => void,
     ): Promise<WorkflowExecutionResult> {
         const context: ExecutionContext = {
             workflowId: workflow.id,
@@ -41,7 +42,7 @@ export class WorkflowRunner {
 
         await Promise.all(
             entryIds.map(id =>
-                this.executeNode(workflow, id, context, results, pendingCounts, visited)
+                this.executeNode(workflow, id, context, results, pendingCounts, visited, onNodeResult)
             )
         );
 
@@ -120,7 +121,8 @@ export class WorkflowRunner {
         context: ExecutionContext,
         results: NodeResult[],
         pendingCounts: Map<string, number>,
-        visited: Set<string>
+        visited: Set<string>,
+        onNodeResult?: (result: NodeResult) => void,
     ): Promise<void> {
         // Fan-in gate: decrement the pending count for this node.
         // A join node (in-degree N) only proceeds when all N upstream branches have arrived.
@@ -132,10 +134,15 @@ export class WorkflowRunner {
         if (visited.has(nodeId)) return;
         visited.add(nodeId);
 
+        const pushResult = (result: NodeResult) => {
+            results.push(result);
+            onNodeResult?.(result);
+        };
+
         // Gracefully handle missing nodes instead of throwing
         const node = workflow.nodes.find(n => n.id === nodeId);
         if (!node) {
-            results.push({
+            pushResult({
                 nodeId,
                 status: 'failure',
                 output: null,
@@ -150,17 +157,17 @@ export class WorkflowRunner {
         // then continue execution through all outgoing edges.
         if (node.disabled) {
             context.variables[nodeId] = { __disabled: true };
-            results.push({ nodeId, status: 'skipped', output: null, durationMs: 0 });
+            pushResult({ nodeId, status: 'skipped', output: null, durationMs: 0 });
 
             if (node.type === 'condition' || node.type === 'switch') {
                 // Routing is unknown without running — skip every branch
                 for (const nextId of this.getAllNextIds(node)) {
-                    await this.skipBranch(workflow, nextId, context, results, pendingCounts, visited);
+                    await this.skipBranch(workflow, nextId, context, results, pendingCounts, visited, onNodeResult);
                 }
             } else {
                 await Promise.all(
                     node.next.filter(Boolean).map(nextId =>
-                        this.executeNode(workflow, nextId, context, results, pendingCounts, visited)
+                        this.executeNode(workflow, nextId, context, results, pendingCounts, visited, onNodeResult)
                     )
                 );
             }
@@ -174,7 +181,7 @@ export class WorkflowRunner {
         try {
             executor = this.registry.get(node.type);
         } catch {
-            results.push({
+            pushResult({
                 nodeId,
                 status: 'failure',
                 output: null,
@@ -190,7 +197,7 @@ export class WorkflowRunner {
             output = await this.executeWithRetryAndTimeout(node, context, executor);
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
-            results.push({
+            pushResult({
                 nodeId,
                 status: 'failure',
                 output: null,
@@ -201,7 +208,7 @@ export class WorkflowRunner {
         }
 
         context.variables[nodeId] = output;
-        results.push({
+        pushResult({
             nodeId,
             status: 'success',
             output,
@@ -213,7 +220,7 @@ export class WorkflowRunner {
         // Execute taken branches first
         await Promise.all(
             takenIds.map(nextId =>
-                this.executeNode(workflow, nextId, context, results, pendingCounts, visited)
+                this.executeNode(workflow, nextId, context, results, pendingCounts, visited, onNodeResult)
             )
         );
 
@@ -221,7 +228,7 @@ export class WorkflowRunner {
         // join nodes can correctly receive their pending count decrements.
         const skippedIds = this.getAllNextIds(node).filter(id => !takenIds.includes(id));
         for (const skippedId of skippedIds) {
-            await this.skipBranch(workflow, skippedId, context, results, pendingCounts, visited);
+            await this.skipBranch(workflow, skippedId, context, results, pendingCounts, visited, onNodeResult);
         }
     }
 
@@ -235,7 +242,8 @@ export class WorkflowRunner {
         context: ExecutionContext,
         results: NodeResult[],
         pendingCounts: Map<string, number>,
-        visited: Set<string>
+        visited: Set<string>,
+        onNodeResult?: (result: NodeResult) => void,
     ): Promise<void> {
         if (!nodeId || visited.has(nodeId)) return;
         visited.add(nodeId);
@@ -243,7 +251,9 @@ export class WorkflowRunner {
         const node = workflow.nodes.find(n => n.id === nodeId);
         if (!node) return;
 
-        results.push({ nodeId, status: 'skipped', output: null, durationMs: 0 });
+        const skippedResult: NodeResult = { nodeId, status: 'skipped', output: null, durationMs: 0 };
+        results.push(skippedResult);
+        onNodeResult?.(skippedResult);
 
         const nextIds = this.getAllNextIds(node);
 
@@ -255,10 +265,10 @@ export class WorkflowRunner {
 
             if (newCount <= 0 && !visited.has(nextId)) {
                 // All branches for this join node are now complete — execute it
-                await this.executeNode(workflow, nextId, context, results, pendingCounts, visited);
+                await this.executeNode(workflow, nextId, context, results, pendingCounts, visited, onNodeResult);
             } else if (!visited.has(nextId)) {
                 // Still waiting on other branches — propagate the skip
-                await this.skipBranch(workflow, nextId, context, results, pendingCounts, visited);
+                await this.skipBranch(workflow, nextId, context, results, pendingCounts, visited, onNodeResult);
             }
         }
     }

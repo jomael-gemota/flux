@@ -5,6 +5,8 @@ import { WorkflowService } from '../services/WorkflowService';
 import { ExecutionQuerySchema, DeleteExecutionsSchema } from '../validation/schemas';
 import { toJsonSchema } from '../validation/toJsonSchema';
 import { NotFoundError, BadRequestError } from '../errors/ApiError';
+import { executionEventBus } from '../events/ExecutionEventBus';
+import { ApiKeyModel } from '../db/models/ApiKeyModel';
 
 export async function executionRoutes(
     fastify: FastifyInstance,
@@ -88,6 +90,103 @@ export async function executionRoutes(
             }
 
             throw BadRequestError('Provide either "ids" array or "workflowId" + "deleteAll": true');
+        }
+    );
+
+    // ── SSE: stream live execution events to the browser ───────────────────
+    // EventSource cannot send custom headers, so auth is passed via query params.
+    fastify.get<{
+        Params: { id: string };
+        Querystring: { token?: string; apiKey?: string };
+    }>(
+        '/executions/:id/events',
+        async (request, reply) => {
+            const { token, apiKey } = request.query;
+
+            if (token) {
+                try {
+                    const decoded = (fastify as any).jwt.verify(token) as { status?: string };
+                    if (decoded.status && decoded.status !== 'approved') {
+                        return reply.code(403).send({ message: 'Account pending approval' });
+                    }
+                } catch {
+                    return reply.code(401).send({ message: 'Invalid or expired token' });
+                }
+            } else if (apiKey) {
+                const doc = await ApiKeyModel.findOne({ key: apiKey });
+                if (!doc) return reply.code(403).send({ message: 'Invalid API key' });
+            } else {
+                return reply.code(401).send({ message: 'Authentication required' });
+            }
+
+            const executionId = request.params.id;
+            const execution = await executionRepo.findById(executionId);
+            if (!execution) {
+                return reply.code(404).send({ message: `Execution ${executionId} not found` });
+            }
+
+            // Hijack the raw response so Fastify doesn't auto-close it
+            reply.hijack();
+            const raw = reply.raw;
+
+            raw.writeHead(200, {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no',
+            });
+
+            const send = (event: string, data: unknown) => {
+                try {
+                    raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+                } catch { /* client already disconnected */ }
+            };
+
+            // If already finished, replay results and close immediately
+            if (execution.status !== 'pending' && execution.status !== 'running') {
+                for (const result of execution.results) {
+                    send('node_result', result);
+                }
+                send('complete', { executionId, status: execution.status });
+                raw.end();
+                return;
+            }
+
+            // Replay any partial results already persisted (incremental writes)
+            for (const result of execution.results) {
+                send('node_result', result);
+            }
+
+            let closed = false;
+
+            const cleanup = () => {
+                if (closed) return;
+                closed = true;
+                clearInterval(heartbeat);
+                unsubNode();
+                unsubComplete();
+            };
+
+            const unsubNode = executionEventBus.onNodeResult(executionId, (result) => {
+                if (!closed) send('node_result', result);
+            });
+
+            const unsubComplete = executionEventBus.onComplete(executionId, (event) => {
+                if (!closed) {
+                    send('complete', { executionId, status: event.status });
+                    cleanup();
+                    raw.end();
+                }
+            });
+
+            // Keep-alive heartbeat (prevents proxies/load-balancers from closing idle connections)
+            const heartbeat = setInterval(() => {
+                if (closed) return;
+                try { raw.write(': heartbeat\n\n'); } catch { cleanup(); }
+            }, 15_000);
+
+            request.raw.on('close', cleanup);
+            request.raw.on('error', cleanup);
         }
     );
 }

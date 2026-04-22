@@ -5,6 +5,7 @@ import { WorkflowRunner } from '../engine/WorkflowRunner';
 import { WorkflowRepository } from '../repositories/WorkflowRepository';
 import { ExecutionRepository } from '../repositories/ExecutionRepository';
 import { NodeResult } from '../types/workflow.types';
+import { executionEventBus } from '../events/ExecutionEventBus';
 
 export function createWorkflowWorker(
     runner: WorkflowRunner,
@@ -21,7 +22,10 @@ export function createWorkflowWorker(
 
             await executionRepo.markRunning(executionId);
 
-            const { results } = await runner.run(workflow, input, triggerNodeId);
+            const { results } = await runner.run(workflow, input, triggerNodeId, (nodeResult) => {
+                executionEventBus.emitNodeResult(executionId, nodeResult);
+                executionRepo.appendNodeResult(executionId, nodeResult).catch(() => {});
+            });
 
             const hasFailure = results.some(r => r.status === 'failure');
             const hasSuccess = results.some(r => r.status === 'success');
@@ -29,6 +33,7 @@ export function createWorkflowWorker(
                 : hasFailure ? 'failure'
                 : 'success';
 
+            executionEventBus.emitComplete({ executionId, workflowId, status });
             await executionRepo.complete(executionId, status, results);
         },
         {
@@ -46,6 +51,8 @@ export function createWorkflowWorker(
                 error: err.message,
                 durationMs: 0,
             };
+            executionEventBus.emitNodeResult(job.data.executionId, syntheticResult);
+            executionEventBus.emitComplete({ executionId: job.data.executionId, workflowId: job.data.workflowId, status: 'failure' });
             await executionRepo.complete(job.data.executionId, 'failure', [syntheticResult]).catch(() => {});
         }
         console.error(`[Worker] Job ${job?.id} failed:`, err.message);

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useWorkflowStore } from '../../store/workflowStore';
 import { useExecutionLog, useExecution, useDeleteExecution, useDeleteExecutions } from '../../hooks/useExecutions';
+import { useExecutionStream } from '../../hooks/useExecutionStream';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { useResizablePanel } from '../../hooks/useResizablePanel';
 import type { ExecutionSummary, NodeResult } from '../../types/workflow';
@@ -569,6 +570,9 @@ export function ExecutionLogPanel() {
 
   // Fetch the selected execution's full details (for node list + output)
   const { data: selectedExec, isLoading: execLoading } = useExecution(selectedExecId);
+
+  // Stream live node results via SSE — updates the React Query cache in real-time
+  useExecutionStream(selectedExecId, activeWorkflow?.id ?? null);
 
   // Auto-select the latest execution when a new trigger fires
   useEffect(() => {
