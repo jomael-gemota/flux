@@ -1,8 +1,9 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   CheckCircle2, XCircle, Clock, Loader2, X, ChevronLeft,
-  AlertCircle, SkipForward, Trash2, Zap,
+  AlertCircle, SkipForward, Trash2, Zap, RefreshCw,
 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useWorkflowStore } from '../../store/workflowStore';
 import { useExecutionLog, useExecution, useDeleteExecution, useDeleteExecutions } from '../../hooks/useExecutions';
 import { useExecutionStream } from '../../hooks/useExecutionStream';
@@ -602,6 +603,22 @@ export function ExecutionLogPanel() {
   const workflowId = activeWorkflow?.id;
   const workflowName = activeWorkflow?.name ?? 'Workflow';
 
+  const qc = useQueryClient();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ['executions', 'log', workflowId] }),
+      qc.invalidateQueries({ queryKey: ['executions', workflowId] }),
+      selectedExecId
+        ? qc.invalidateQueries({ queryKey: ['executions', 'detail', selectedExecId] })
+        : Promise.resolve(),
+    ]);
+    // Keep the spinner visible just long enough for the user to notice
+    setTimeout(() => setIsRefreshing(false), 600);
+  }, [qc, workflowId, selectedExecId]);
+
   const selectedNodeResult =
     selectedExec?.results.find((r) => r.nodeId === selectedNodeId) ?? null;
 
@@ -641,8 +658,17 @@ export function ExecutionLogPanel() {
         )}
 
         <button
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          title="Refresh logs"
+          className="text-slate-400 dark:text-slate-500 hover:text-blue-500 dark:hover:text-blue-400 transition-colors shrink-0 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+        </button>
+
+        <button
           onClick={() => setLogOpen(false)}
-          className="text-slate-400 dark:text-slate-500 hover:text-gray-900 dark:hover:text-white transition-colors shrink-0 ml-auto"
+          className="text-slate-400 dark:text-slate-500 hover:text-gray-900 dark:hover:text-white transition-colors shrink-0"
           title="Close"
         >
           <X className="w-3.5 h-3.5" />
