@@ -267,6 +267,9 @@ export class PollingService {
         since: Date,
         lastSeenId: string,
     ): Promise<{ items: Array<Record<string, unknown>>; lastSeenId: string }> {
+        // No event type configured — nothing to check.
+        if (!config.eventType) return { items: [], lastSeenId };
+
         switch (config.appType) {
             case 'basecamp': return this.pollBasecamp(config, since, lastSeenId);
             case 'slack':    return this.pollSlack(config, since, lastSeenId);
@@ -408,6 +411,10 @@ export class PollingService {
         }
 
         // ── Message-based events (any_event, new_message, app_mention, reaction_added) ──
+        // Any event type not handled above returns empty — no spurious triggers.
+        const MESSAGE_EVENTS = new Set(['any_event', 'new_message', 'app_mention', 'reaction_added']);
+        if (!MESSAGE_EVENTS.has(eventType ?? '')) return { items: [], lastSeenId };
+
         // Resolve which channels to scan
         let channelIds: string[] = [];
         if (slackChannelId) {
@@ -566,7 +573,10 @@ export class PollingService {
             return { items: newMembers, lastSeenId: newLastSeen };
         }
 
-        // ── New chat message (default / new_chat_message) ────────────────
+        // ── New chat message ─────────────────────────────────────────────
+        // Only this specific event type reaches here; anything else returns empty.
+        if (eventType !== 'new_chat_message') return { items: [], lastSeenId };
+
         const res = await fetch(
             `https://graph.microsoft.com/v1.0/me/chats/getAllMessages?$filter=lastModifiedDateTime gt ${sinceISO}&$top=50`,
             { headers: graphHdr },
@@ -596,6 +606,11 @@ export class PollingService {
     ): Promise<{ items: Array<Record<string, unknown>>; lastSeenId: string }> {
         const { credentialId, eventType, fileId, folderId } = config;
         if (!credentialId) return { items: [], lastSeenId };
+
+        // Only the two supported Drive event types do anything.
+        if (eventType !== 'file_changed' && eventType !== 'folder_changed') {
+            return { items: [], lastSeenId };
+        }
 
         const client = await this.googleAuth.getAuthenticatedClient(credentialId);
         const token = (await client.getAccessToken()).token;
@@ -683,6 +698,10 @@ export class PollingService {
         if (modifiedTime && modifiedTime <= since && currentVersion === storedVersion) {
             return { items: [], lastSeenId };
         }
+
+        // Only fetch sheet data for the three supported event types.
+        const SHEET_EVENTS = new Set(['row_added', 'row_updated', 'row_added_or_updated']);
+        if (!SHEET_EVENTS.has(eventType ?? '')) return { items: [], lastSeenId };
 
         // Fetch current sheet data
         const range = sheetName ? `${encodeURIComponent(sheetName)}!A:Z` : 'Sheet1!A:Z';
