@@ -282,6 +282,8 @@ export function VariablePickerPanel({
   testResults: Record<string, NodeTestResult>;
   onInsert: (expression: string) => void;
 }) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
   if (nodes.length === 0) return null;
 
   return (
@@ -291,18 +293,22 @@ export function VariablePickerPanel({
           Click a field to insert it
         </p>
         <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
-          The expression will be placed at your cursor position.
+          Arrays &amp; objects can be expanded ▶ to insert individual values.
         </p>
       </div>
 
-      <div className="max-h-60 overflow-y-auto">
+      <div className="max-h-72 overflow-y-auto">
         {nodes.map((n) => {
           const testResult = testResults[n.id];
           const realOutput = testResult?.status === 'success' && testResult.output != null
             ? (testResult.output as Record<string, unknown>)
             : null;
 
-          // Build field list from real test output if available, otherwise use generic catalogue
+          // Detect GSheets app-event trigger for Zapier-style column display
+          const isGSheetsAppEvent =
+            n.data.nodeType === 'trigger' &&
+            (n.data.config as Record<string, unknown>)?.appType === 'gsheets';
+
           const fields: Array<{ key: string; label: string; realValue?: unknown; hasReal: boolean }> =
             realOutput
               ? Object.entries(realOutput).map(([key, val]) => ({
@@ -321,28 +327,26 @@ export function VariablePickerPanel({
               <div className="flex items-center gap-1.5 mb-1.5">
                 <span
                   className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                    n.data.nodeType === 'http' ? 'bg-blue-400' :
-                    n.data.nodeType === 'llm' ? 'bg-emerald-400' :
-                    n.data.nodeType === 'trigger' ? 'bg-violet-400' :
+                    n.data.nodeType === 'http'      ? 'bg-blue-400' :
+                    n.data.nodeType === 'llm'       ? 'bg-emerald-400' :
+                    n.data.nodeType === 'trigger'   ? 'bg-violet-400' :
                     n.data.nodeType === 'transform' ? 'bg-cyan-400' :
                     n.data.nodeType === 'condition' ? 'bg-amber-400' :
-                    n.data.nodeType === 'switch' ? 'bg-orange-400' :
+                    n.data.nodeType === 'switch'    ? 'bg-orange-400' :
                     'bg-rose-400'
                   }`}
                 />
                 <span className="text-[11px] font-semibold text-gray-900 dark:text-white truncate">{n.data.label}</span>
                 <span className="text-[9px] text-slate-400 dark:text-slate-500 shrink-0">{n.data.nodeType}</span>
-                {realOutput && (
-                  <span className="text-[9px] text-emerald-500 shrink-0 ml-auto">● live data</span>
-                )}
-                {!realOutput && (
-                  <span className="text-[9px] text-slate-600 shrink-0 ml-auto italic">run or test to see real fields</span>
-                )}
+                {realOutput
+                  ? <span className="text-[9px] text-emerald-500 shrink-0 ml-auto">● live data</span>
+                  : <span className="text-[9px] text-slate-600 shrink-0 ml-auto italic">run or test to see real fields</span>
+                }
               </div>
 
-              <div className="flex flex-wrap gap-1">
+              <div className="space-y-1">
                 {n.data.nodeType === 'transform' && !realOutput ? (
-                  <>
+                  <div className="flex flex-wrap items-center gap-1">
                     <button
                       type="button"
                       onClick={() => onInsert(`{{nodes.${n.id}.YOUR_KEY}}`)}
@@ -351,8 +355,8 @@ export function VariablePickerPanel({
                     >
                       .YOUR_KEY
                     </button>
-                    <span className="text-[10px] text-slate-400 dark:text-slate-500 self-center">← replace with your mapping key</span>
-                  </>
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500">← replace with your mapping key</span>
+                  </div>
                 ) : fields.length === 0 ? (
                   <button
                     type="button"
@@ -362,26 +366,146 @@ export function VariablePickerPanel({
                     {`{{nodes.${n.id}}}`}
                   </button>
                 ) : (
-                  fields.map((f) => (
-                    f.key === '…' ? null : (
-                      <button
-                        key={f.key}
-                        type="button"
-                        onClick={() => onInsert(`{{nodes.${n.id}.${f.key}}}`)}
-                        title={`Inserts: {{nodes.${n.id}.${f.key}}}`}
-                        className="inline-flex items-center gap-1 text-[10px] bg-slate-200 dark:bg-slate-700 hover:bg-blue-700 text-emerald-600 dark:text-emerald-300 hover:text-white rounded px-1.5 py-0.5 transition-colors font-mono"
-                      >
-                        <span>.{f.key}</span>
-                        {f.hasReal ? (
-                          <span className="font-sans text-slate-500 dark:text-slate-400 group-hover:text-gray-800 dark:group-hover:text-slate-200 ml-0.5">
-                            = <ValuePreview value={f.realValue} />
-                          </span>
-                        ) : (
-                          <span className="font-sans text-slate-400 dark:text-slate-500 ml-0.5">{f.label}</span>
+                  fields.map((f) => {
+                    if (f.key === '…') return null;
+
+                    const expandKey = `${n.id}::${f.key}`;
+                    const isArr = f.hasReal && Array.isArray(f.realValue);
+                    const isObj = f.hasReal && !isArr && typeof f.realValue === 'object' && f.realValue !== null;
+
+                    // Auto-expand the "items" field for GSheets triggers when live data is present
+                    const autoExpand = isGSheetsAppEvent && f.key === 'items' && isArr;
+                    const isOpen = expanded[expandKey] ?? autoExpand;
+
+                    const firstItem = isArr && (f.realValue as unknown[]).length > 0
+                      ? (f.realValue as unknown[])[0]
+                      : null;
+                    const firstIsObj = firstItem !== null && typeof firstItem === 'object';
+
+                    return (
+                      <div key={f.key} className="space-y-0.5">
+                        {/* Top-level field row */}
+                        <div className="flex flex-wrap items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => onInsert(`{{nodes.${n.id}.${f.key}}}`)}
+                            title={`Insert: {{nodes.${n.id}.${f.key}}}`}
+                            className="inline-flex items-center gap-1 text-[10px] bg-slate-200 dark:bg-slate-700 hover:bg-blue-700 text-emerald-600 dark:text-emerald-300 hover:text-white rounded px-1.5 py-0.5 transition-colors font-mono"
+                          >
+                            <span>.{f.key}</span>
+                            {f.hasReal ? (
+                              <span className="font-sans text-slate-500 dark:text-slate-400 ml-0.5">
+                                = <ValuePreview value={f.realValue} />
+                              </span>
+                            ) : (
+                              <span className="font-sans text-slate-400 dark:text-slate-500 ml-0.5">{f.label}</span>
+                            )}
+                          </button>
+
+                          {/* Expand / collapse toggle for arrays and objects */}
+                          {(isArr || isObj) && (
+                            <button
+                              type="button"
+                              onClick={() => setExpanded((prev) => ({ ...prev, [expandKey]: !isOpen }))}
+                              className="inline-flex items-center gap-0.5 text-[9px] text-blue-400 hover:text-blue-300 px-1 py-0.5 rounded hover:bg-slate-700/60 transition-colors"
+                              title={isOpen ? 'Collapse' : 'Expand to insert individual values'}
+                            >
+                              {isOpen
+                                ? <ChevronUp   className="w-2.5 h-2.5" />
+                                : <ChevronDown className="w-2.5 h-2.5" />
+                              }
+                              {isOpen ? 'collapse' : 'expand'}
+                            </button>
+                          )}
+                        </div>
+
+                        {/* ── Expanded: array ── */}
+                        {isOpen && isArr && (
+                          <div className="ml-2 pl-2 border-l-2 border-violet-700/40 space-y-0.5">
+                            {/* GSheets special view: column header → cell value */}
+                            {isGSheetsAppEvent && f.key === 'items' && firstIsObj ? (
+                              <>
+                                <p className="text-[9px] text-violet-400 font-semibold uppercase tracking-wider pt-0.5 pb-1">
+                                  Row columns — click to insert
+                                </p>
+                                {Object.entries(firstItem as Record<string, unknown>).map(([col, val]) => (
+                                  <button
+                                    key={col}
+                                    type="button"
+                                    onClick={() => onInsert(`{{nodes.${n.id}.items[0].${col}}}`)}
+                                    title={`Insert: {{nodes.${n.id}.items[0].${col}}}`}
+                                    className="flex w-full items-center gap-1.5 text-[10px] bg-violet-900/20 hover:bg-blue-700 text-violet-200 hover:text-white rounded px-1.5 py-1 transition-colors"
+                                  >
+                                    <span className="font-semibold text-violet-300 shrink-0 min-w-0 truncate">{col}</span>
+                                    <span className="text-slate-500 font-sans ml-auto shrink-0 pl-2">
+                                      = <ValuePreview value={val} />
+                                    </span>
+                                  </button>
+                                ))}
+                              </>
+                            ) : (
+                              <>
+                                {/* Generic array: first-item button */}
+                                <button
+                                  type="button"
+                                  onClick={() => onInsert(`{{nodes.${n.id}.${f.key}[0]}}`)}
+                                  title={`Insert: {{nodes.${n.id}.${f.key}[0]}}`}
+                                  className="inline-flex items-center gap-1 text-[10px] bg-slate-200 dark:bg-slate-700 hover:bg-blue-700 text-emerald-600 dark:text-emerald-300 hover:text-white rounded px-1.5 py-0.5 transition-colors font-mono"
+                                >
+                                  .{f.key}[0]
+                                  {firstItem !== null && (
+                                    <span className="font-sans text-slate-500 dark:text-slate-400 ml-0.5">
+                                      = <ValuePreview value={firstItem} />
+                                    </span>
+                                  )}
+                                </button>
+
+                                {/* If first item is an object, expose each sub-key individually */}
+                                {firstIsObj && (
+                                  <div className="flex flex-wrap gap-1 pt-0.5">
+                                    {Object.entries(firstItem as Record<string, unknown>).map(([subKey, subVal]) => (
+                                      <button
+                                        key={subKey}
+                                        type="button"
+                                        onClick={() => onInsert(`{{nodes.${n.id}.${f.key}[0].${subKey}}}`)}
+                                        title={`Insert: {{nodes.${n.id}.${f.key}[0].${subKey}}}`}
+                                        className="inline-flex items-center gap-1 text-[10px] bg-slate-200 dark:bg-slate-700 hover:bg-blue-700 text-emerald-600 dark:text-emerald-300 hover:text-white rounded px-1.5 py-0.5 transition-colors font-mono"
+                                      >
+                                        .{f.key}[0].{subKey}
+                                        <span className="font-sans text-slate-500 dark:text-slate-400 ml-0.5">
+                                          = <ValuePreview value={subVal} />
+                                        </span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
                         )}
-                      </button>
-                    )
-                  ))
+
+                        {/* ── Expanded: object sub-keys ── */}
+                        {isOpen && isObj && (
+                          <div className="ml-2 pl-2 border-l-2 border-cyan-700/40 flex flex-wrap gap-1">
+                            {Object.entries(f.realValue as Record<string, unknown>).map(([subKey, subVal]) => (
+                              <button
+                                key={subKey}
+                                type="button"
+                                onClick={() => onInsert(`{{nodes.${n.id}.${f.key}.${subKey}}}`)}
+                                title={`Insert: {{nodes.${n.id}.${f.key}.${subKey}}}`}
+                                className="inline-flex items-center gap-1 text-[10px] bg-slate-200 dark:bg-slate-700 hover:bg-blue-700 text-emerald-600 dark:text-emerald-300 hover:text-white rounded px-1.5 py-0.5 transition-colors font-mono"
+                              >
+                                .{f.key}.{subKey}
+                                <span className="font-sans text-slate-500 dark:text-slate-400 ml-0.5">
+                                  = <ValuePreview value={subVal} />
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -8490,16 +8614,30 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
   const groupId          = String(cfg.groupId ?? '');
   const includeCompleted = Boolean(cfg.includeCompleted);
 
+  // Detect whether a config value is a variable expression (contains {{ }})
+  const isExprVal = (v: string) => /\{\{/.test(v);
+
+  // Mode state: 'select' = pick from list, 'expr' = type / insert variable
+  const [projectMode,   setProjectMode]   = useState<'select' | 'expr'>(() => isExprVal(projectId)  ? 'expr' : 'select');
+  const [todolistMode,  setTodolistMode]  = useState<'select' | 'expr'>(() => isExprVal(todolistId) ? 'expr' : 'select');
+
+  // When project is an expression, force todolist to expression mode too (no project to query todolists from)
+  const effectiveTodolistMode: 'select' | 'expr' = projectMode === 'expr' ? 'expr' : todolistMode;
+
+  // Don't query APIs with expression strings — pass empty string to disable the hooks
+  const safeProjectId   = isExprVal(projectId)  ? '' : projectId;
+  const safeTodolistId  = isExprVal(todolistId) ? '' : todolistId;
+
   const { data: projects = [],  isLoading: loadingProjects,  isError: errorProjects }  = useBasecampProjects(credentialId);
-  const { data: todolists = [], isLoading: loadingTodolists, isError: errorTodolists } = useBasecampTodolists(credentialId, projectId);
+  const { data: todolists = [], isLoading: loadingTodolists, isError: errorTodolists } = useBasecampTodolists(credentialId, safeProjectId);
   const { data: todoGroups = [], isLoading: loadingGroups } = useBasecampTodoGroups(
-    needsTodolistForAction(action) ? credentialId : '', todolistId
+    needsTodolistForAction(action) ? credentialId : '', safeTodolistId
   );
   const todoStatus = action === 'uncomplete_todo' ? 'completed' as const : 'active' as const;
   const { data: todos = [],     isLoading: loadingTodos,     isError: errorTodos }     = useBasecampTodos(
-    (action === 'complete_todo' || action === 'uncomplete_todo') ? credentialId : '', todolistId, todoStatus
+    (action === 'complete_todo' || action === 'uncomplete_todo') ? credentialId : '', safeTodolistId, todoStatus
   );
-  const { data: people = [],    isLoading: loadingPeople }    = useBasecampPeople(credentialId, projectId || undefined);
+  const { data: people = [],    isLoading: loadingPeople }    = useBasecampPeople(credentialId, isExprVal(projectId) ? undefined : (projectId || undefined));
 
   const needsProject  = ['create_todo', 'post_message', 'send_campfire', 'list_todos'].includes(action);
   const needsTodolist = ['create_todo', 'list_todos'].includes(action);
@@ -8526,12 +8664,39 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
         ]}
       />
 
-      {/* ── Project picker (cascading) ────────────────────────────────── */}
+      {/* ── Project picker (cascading, supports variables) ─────────────── */}
       {needsProject && (
         <div className="space-y-1">
-          <span className="block text-xs font-medium text-slate-500 dark:text-slate-400">Project</span>
+          <div className="flex items-center justify-between">
+            <span className="block text-xs font-medium text-slate-500 dark:text-slate-400">Project</span>
+            {credentialId && (
+              <button
+                type="button"
+                onClick={() => {
+                  const next = projectMode === 'select' ? 'expr' : 'select';
+                  setProjectMode(next);
+                  if (next === 'select') onChange({ projectId: '', todolistId: '', groupId: '', todoId: '' });
+                }}
+                className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded transition-colors text-blue-400 hover:text-white hover:bg-blue-700"
+                title="Toggle between picking from the list and entering a variable expression"
+              >
+                <Braces className="w-2.5 h-2.5" />
+                {projectMode === 'select' ? 'Use variable' : 'Select from list'}
+              </button>
+            )}
+          </div>
+
           {!credentialId ? (
             <p className="text-[10px] text-slate-400 dark:text-slate-500">Select an account first.</p>
+          ) : projectMode === 'expr' ? (
+            <ExpressionInput
+              value={projectId}
+              onChange={(v) => onChange({ projectId: v })}
+              placeholder="{{nodes.trigger.items[0].projectId}}"
+              nodes={otherNodes}
+              testResults={testResults}
+              hint="Enter a Basecamp project ID directly or insert a variable expression."
+            />
           ) : loadingProjects ? (
             <div className="flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-slate-500 py-1">
               <Loader2 className="w-3 h-3 animate-spin" /> Loading projects…
@@ -8559,7 +8724,7 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
               ))}
             </div>
           )}
-          {projectId && projects.length > 0 && (
+          {projectMode === 'select' && projectId && projects.length > 0 && (
             <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
               Selected: <span className="text-slate-700 dark:text-slate-300">{projects.find((p) => String(p.id) === projectId)?.name ?? projectId}</span>
             </p>
@@ -8567,11 +8732,46 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
         </div>
       )}
 
-      {/* ── To-do list picker (cascading from project) ────────────────── */}
-      {needsTodolist && projectId && (
+      {/* ── To-do list picker (cascading from project, supports variables) ─ */}
+      {needsTodolist && (effectiveTodolistMode === 'expr' || safeProjectId) && (
         <div className="space-y-1">
-          <span className="block text-xs font-medium text-slate-500 dark:text-slate-400">To-Do List</span>
-          {loadingTodolists ? (
+          <div className="flex items-center justify-between">
+            <span className="block text-xs font-medium text-slate-500 dark:text-slate-400">To-Do List</span>
+            {/* Only show mode toggle when project is not already an expression */}
+            {credentialId && projectMode !== 'expr' && (
+              <button
+                type="button"
+                onClick={() => {
+                  const next = todolistMode === 'select' ? 'expr' : 'select';
+                  setTodolistMode(next);
+                  if (next === 'select') onChange({ todolistId: '', groupId: '', todoId: '' });
+                }}
+                className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded transition-colors text-blue-400 hover:text-white hover:bg-blue-700"
+                title="Toggle between picking from the list and entering a variable expression"
+              >
+                <Braces className="w-2.5 h-2.5" />
+                {todolistMode === 'select' ? 'Use variable' : 'Select from list'}
+              </button>
+            )}
+          </div>
+
+          {effectiveTodolistMode === 'expr' ? (
+            <>
+              {projectMode === 'expr' && (
+                <p className="text-[10px] text-amber-400/80">
+                  Project is a variable — enter the to-do list ID as a variable too.
+                </p>
+              )}
+              <ExpressionInput
+                value={todolistId}
+                onChange={(v) => onChange({ todolistId: v, groupId: '', todoId: '' })}
+                placeholder="{{nodes.trigger.items[0].todolistId}}"
+                nodes={otherNodes}
+                testResults={testResults}
+                hint="Enter a Basecamp to-do list ID directly or insert a variable expression."
+              />
+            </>
+          ) : loadingTodolists ? (
             <div className="flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-slate-500 py-1">
               <Loader2 className="w-3 h-3 animate-spin" /> Loading to-do lists…
             </div>
@@ -8601,7 +8801,7 @@ function BasecampConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps)
               ))}
             </div>
           )}
-          {todolistId && todolists.length > 0 && (
+          {effectiveTodolistMode === 'select' && todolistId && todolists.length > 0 && (
             <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
               Selected: <span className="text-slate-700 dark:text-slate-300">{todolists.find((tl) => String(tl.id) === todolistId)?.name ?? todolistId}</span>
             </p>
