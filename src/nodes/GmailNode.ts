@@ -1,9 +1,11 @@
 import { google } from 'googleapis';
 import { Readable } from 'stream';
+import nodemailer from 'nodemailer';
 import { NodeExecutor } from '../engine/NodeExecutor';
 import { WorkflowNode, ExecutionContext } from '../types/workflow.types';
 import { GoogleAuthService } from '../services/GoogleAuthService';
 import { ExpressionResolver } from '../engine/ExpressionResolver';
+import { buildFluxMessageHtml } from '../utils/emailTemplates';
 
 type GmailAction =
     | 'send' | 'send_and_wait' | 'reply'
@@ -11,7 +13,8 @@ type GmailAction =
     | 'add_label' | 'remove_label'
     | 'mark_read' | 'mark_unread'
     | 'delete_message' | 'delete_conversation'
-    | 'create_draft' | 'get_draft' | 'list_drafts' | 'delete_draft';
+    | 'create_draft' | 'get_draft' | 'list_drafts' | 'delete_draft'
+    | 'send_flux';
 
 interface GmailConfig {
     credentialId: string;
@@ -23,6 +26,8 @@ interface GmailConfig {
     subject?: string;
     body?: string;
     isHtml?: boolean;
+    // send_flux — use Flux SMTP service account
+    useFluxTemplate?: boolean;   // wrap body in Flux branded HTML template
     // send_and_wait — how long to poll for a reply (minutes, default 5)
     waitMinutes?: number;
     // reply — ID of the message being replied to
@@ -709,6 +714,69 @@ export class GmailNode implements NodeExecutor {
 
             await gmail.users.drafts.delete({ userId: 'me', id: draftId });
             return { deleted: true, draftId };
+        }
+
+        // ── send_flux ──────────────────────────────────────────────────────────
+        // Send an email via the Flux SMTP service account (configured in .env)
+        // instead of the user's connected Gmail account.  Optionally wraps
+        // the body in the Flux branded HTML email template.
+
+        if (action === 'send_flux') {
+            const smtpHost    = process.env.SMTP_HOST;
+            const smtpUser    = process.env.SMTP_USER;
+            const smtpPass    = process.env.SMTP_PASS;
+            const smtpFrom    = process.env.SMTP_FROM_ADDRESS;
+            const fromName    = process.env.SMTP_FROM_NAME ?? 'Flux Workflow';
+
+            if (!smtpHost || !smtpUser || !smtpPass || !smtpFrom) {
+                throw new Error(
+                    'Gmail send_flux: SMTP is not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS, and SMTP_FROM_ADDRESS in your .env file.'
+                );
+            }
+
+            const toAddr      = resolveAddresses(config.to);
+            const ccAddr      = resolveAddresses(config.cc);
+            const bccAddr     = resolveAddresses(config.bcc);
+            const subject     = this.resolver.resolveTemplate(config.subject ?? '', context);
+            const rawBody     = this.resolver.resolveTemplate(config.body    ?? '', context);
+            const useTemplate = config.useFluxTemplate !== false; // default ON
+
+            if (!toAddr)  throw new Error('Gmail send_flux: "to" is required');
+            if (!subject) throw new Error('Gmail send_flux: "subject" is required');
+
+            const htmlBody = useTemplate
+                ? buildFluxMessageHtml(subject, rawBody, config.isHtml ?? false)
+                : config.isHtml
+                    ? rawBody
+                    : `<pre style="font-family:inherit;white-space:pre-wrap;">${rawBody.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>`;
+
+            const port   = Number(process.env.SMTP_PORT ?? 587);
+            const secure = process.env.SMTP_SECURE === 'true';
+
+            const transporter = nodemailer.createTransport({
+                host: smtpHost, port, secure,
+                auth: { user: smtpUser, pass: smtpPass },
+            });
+
+            const info = await transporter.sendMail({
+                from:    `"${fromName}" <${smtpFrom}>`,
+                to:      toAddr,
+                ...(ccAddr  ? { cc:  ccAddr  } : {}),
+                ...(bccAddr ? { bcc: bccAddr } : {}),
+                subject,
+                html:    htmlBody,
+                text:    rawBody,
+            });
+
+            return {
+                messageId:    info.messageId,
+                accepted:     info.accepted,
+                rejected:     info.rejected,
+                from:         smtpFrom,
+                to:           toAddr,
+                subject,
+                usedTemplate: useTemplate,
+            };
         }
 
         throw new Error(`Gmail node: unknown action "${action}"`);

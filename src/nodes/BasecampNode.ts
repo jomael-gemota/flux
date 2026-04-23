@@ -297,8 +297,29 @@ export class BasecampNode implements NodeExecutor {
                 method: 'POST', headers, body: JSON.stringify(body),
             });
             if (!res.ok) throw new Error(`Basecamp create_todo failed (${res.status}): ${await res.text()}`);
-            const todo = await res.json();
-            return { id: (todo as Record<string, unknown>).id, title: content, status: 'created' };
+            const todo = await res.json() as Record<string, unknown>;
+
+            // Normalise assignees to a simple [{id, name, email}] list
+            const todoAssignees = ((todo.assignees as Array<Record<string, unknown>>) ?? []).map((a) => ({
+                id:    a.id,
+                name:  a.name,
+                email: a.email_address,
+            }));
+
+            return {
+                id:          todo.id,
+                title:       content,
+                description: (todo.description as string) ?? description ?? '',
+                status:      'created',
+                appUrl:      todo.app_url,
+                url:         todo.url,
+                dueOn:       todo.due_on ?? (dueOn || null),
+                assignees:   todoAssignees,
+                completed:   todo.completed ?? false,
+                createdAt:   todo.created_at,
+                projectId,
+                todolistId:  groupId || todolistId,
+            };
         }
 
         if (action === 'complete_todo') {

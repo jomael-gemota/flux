@@ -67,11 +67,16 @@ const NODE_OUTPUT_FIELDS: Record<string, OutputField[]> = {
   ],
   output: [{ key: 'value', label: 'Resolved output value' }],
   gmail: [
-    { key: 'messageId', label: 'Message ID (send)' },
-    { key: 'messages', label: 'Message list (list)' },
-    { key: 'body', label: 'Email body text (read)' },
-    { key: 'subject', label: 'Subject (read)' },
-    { key: 'from', label: 'From address (read)' },
+    { key: 'messageId',    label: 'Message ID (send / send_flux)' },
+    { key: 'threadId',     label: 'Thread ID (send)' },
+    { key: 'accepted',     label: 'Accepted recipients array (send_flux)' },
+    { key: 'rejected',     label: 'Rejected recipients array (send_flux)' },
+    { key: 'from',         label: 'From address used (send_flux / read)' },
+    { key: 'to',           label: 'To address (send_flux)' },
+    { key: 'subject',      label: 'Subject line (send_flux / read)' },
+    { key: 'usedTemplate', label: 'Whether Flux template was applied (send_flux)' },
+    { key: 'messages',     label: 'Message list (list)' },
+    { key: 'body',         label: 'Email body text (read)' },
   ],
   gdrive: [
     { key: 'files',        label: 'File/folder list (list)' },
@@ -123,12 +128,20 @@ const NODE_OUTPUT_FIELDS: Record<string, OutputField[]> = {
     { key: 'fieldsApplied',  label: 'Format fields applied (format_cells)' },
   ],
   basecamp: [
-    { key: 'id',        label: 'Created/matched resource ID' },
-    { key: 'title',     label: 'To-do title (create)' },
-    { key: 'status',    label: 'Action status (created/posted/sent)' },
-    { key: 'completed', label: 'Completion flag (complete/uncomplete)' },
-    { key: 'todos',     label: 'To-do list (list_todos)' },
-    { key: 'count',     label: 'To-do count (list_todos)' },
+    { key: 'id',          label: 'To-do / resource ID (create / complete)' },
+    { key: 'title',       label: 'To-do title / name (create)' },
+    { key: 'description', label: 'To-do description (create)' },
+    { key: 'appUrl',      label: 'To-do link — open in Basecamp (create)' },
+    { key: 'url',         label: 'To-do API URL (create)' },
+    { key: 'dueOn',       label: 'Due date YYYY-MM-DD (create)' },
+    { key: 'assignees',   label: 'Assignees array [{id, name, email}] (create)' },
+    { key: 'createdAt',   label: 'Creation timestamp ISO (create)' },
+    { key: 'projectId',   label: 'Project ID used (create)' },
+    { key: 'todolistId',  label: 'To-do list ID used (create)' },
+    { key: 'status',      label: 'Action status (created / posted / sent)' },
+    { key: 'completed',   label: 'Completion flag (complete / uncomplete)' },
+    { key: 'todos',       label: 'To-do list array (list_todos)' },
+    { key: 'count',       label: 'To-do count (list_todos)' },
   ],
   slack: [
     { key: 'ok',        label: 'Slack API success flag' },
@@ -2421,15 +2434,53 @@ function BasecampResultDisplay({ result }: { result: NodeTestResult }) {
         ? 'To-do marked as incomplete'
         : 'Action completed';
 
+  const richSingle = out as {
+    id?: unknown; title?: string; subject?: string;
+    description?: string; appUrl?: string; url?: string;
+    dueOn?: string; assignees?: Array<{ id: unknown; name: string; email?: string }>;
+    createdAt?: string; projectId?: string; todolistId?: string;
+    status?: string; completed?: boolean; todoId?: string;
+  };
+
   return (
     <div className="p-3 space-y-2">
       <SuccessBanner text={bannerText} />
       <div className="space-y-0.5">
-        {single.title   && <InfoRow label="Title"     value={single.title} />}
-        {single.subject && <InfoRow label="Subject"   value={single.subject} />}
-        {single.id != null && <InfoRow label="ID"     value={String(single.id)} mono />}
-        {single.todoId  && <InfoRow label="To-do ID"  value={single.todoId} mono />}
+        {richSingle.title       && <InfoRow label="Title"       value={richSingle.title} />}
+        {richSingle.description && <InfoRow label="Description" value={richSingle.description} />}
+        {richSingle.id != null  && <InfoRow label="ID"          value={String(richSingle.id)} mono />}
+        {richSingle.appUrl      && (
+          <div className="flex items-start gap-2 py-0.5">
+            <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0 w-24">Link</span>
+            <a href={richSingle.appUrl} target="_blank" rel="noopener noreferrer"
+               className="text-[11px] text-blue-500 dark:text-blue-400 hover:underline break-all leading-snug">
+              Open in Basecamp ↗
+            </a>
+          </div>
+        )}
+        {richSingle.dueOn       && <InfoRow label="Due on"      value={richSingle.dueOn} />}
+        {richSingle.createdAt   && <InfoRow label="Created at"  value={richSingle.createdAt} />}
+        {richSingle.subject     && <InfoRow label="Subject"     value={richSingle.subject} />}
+        {richSingle.todoId      && <InfoRow label="To-do ID"    value={richSingle.todoId} mono />}
+        {richSingle.projectId   && <InfoRow label="Project ID"  value={richSingle.projectId} mono />}
+        {richSingle.todolistId  && <InfoRow label="List ID"     value={richSingle.todolistId} mono />}
       </div>
+      {Array.isArray(richSingle.assignees) && richSingle.assignees.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Assignees</p>
+          <div className="space-y-1">
+            {richSingle.assignees.map((a) => (
+              <div key={String(a.id)} className="flex items-center gap-2 text-[11px]">
+                <span className="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center text-[10px] font-bold text-green-700 dark:text-green-300 shrink-0">
+                  {a.name.charAt(0).toUpperCase()}
+                </span>
+                <span className="text-slate-700 dark:text-slate-200">{a.name}</span>
+                {a.email && <span className="text-slate-400 dark:text-slate-500">{a.email}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -5068,13 +5119,18 @@ function GmailConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
 
   return (
     <div className="space-y-3">
-      <CredentialSelect value={String(cfg.credentialId ?? '')} onChange={(id) => onChange({ credentialId: id })} />
+      {action !== 'send_flux' && (
+        <CredentialSelect value={String(cfg.credentialId ?? '')} onChange={(id) => onChange({ credentialId: id })} />
+      )}
 
       <Select
         label="Action"
         value={action}
         onChange={(e) => onChange({ action: e.target.value })}
         options={[
+          { group: 'Flux Actions', options: [
+            { value: 'send_flux', label: '⚡ Send via Flux (SMTP)' },
+          ]},
           { group: 'Message Actions', options: [
             { value: 'send',           label: 'Send Email' },
             { value: 'send_and_wait',  label: 'Send & Wait for Reply' },
@@ -5096,6 +5152,74 @@ function GmailConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
           ]},
         ]}
       />
+
+      {/* ── Send via Flux SMTP ─────────────────────────────── */}
+      {action === 'send_flux' && (
+        <>
+          <EmailTagInput
+            label="To"
+            value={(() => {
+              const v = cfg.to;
+              if (Array.isArray(v)) return v as string[];
+              if (typeof v === 'string' && v.trim()) return v.split(',').map((s) => s.trim()).filter(Boolean);
+              return [];
+            })()}
+            onChange={(v) => onChange({ to: v })}
+            placeholder="recipient@example.com"
+            nodes={otherNodes} testResults={testResults} />
+          <EmailTagInput
+            label="Cc (optional)"
+            value={(() => {
+              const v = cfg.cc;
+              if (Array.isArray(v)) return v as string[];
+              if (typeof v === 'string' && v.trim()) return v.split(',').map((s) => s.trim()).filter(Boolean);
+              return [];
+            })()}
+            onChange={(v) => onChange({ cc: v.length ? v : undefined })}
+            placeholder="cc@example.com"
+            nodes={otherNodes} testResults={testResults} />
+          <ExpressionInput
+            label="Subject"
+            value={String(cfg.subject ?? '')}
+            onChange={(v) => onChange({ subject: v })}
+            placeholder="Your subject line"
+            nodes={otherNodes} testResults={testResults} />
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-1">
+              <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Body</label>
+              <button type="button" onClick={autoFormatBody}
+                className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded text-violet-500 dark:text-violet-400 hover:text-gray-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+                <Wand2 className="w-2.5 h-2.5" />Auto format
+              </button>
+            </div>
+            <ExpressionTextArea label="" value={String(cfg.body ?? '')} onChange={(v) => onChange({ body: v })}
+              placeholder="Write your email body here…" nodes={otherNodes} testResults={testResults} rows={6} resizable />
+          </div>
+          <div className="space-y-2 rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="flux-use-template"
+                checked={cfg.useFluxTemplate !== false}
+                onChange={(e) => onChange({ useFluxTemplate: e.target.checked })}
+                className="w-3.5 h-3.5 rounded accent-blue-500" />
+              <label htmlFor="flux-use-template" className="text-xs font-medium text-slate-700 dark:text-slate-200">
+                Use Flux branded email template
+              </label>
+            </div>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed pl-5">
+              Wraps your body in a clean branded email card with the Flux Workflow header and footer. Disable to send raw HTML or plain text.
+            </p>
+            <div className="flex items-center gap-2 pl-5">
+              <input type="checkbox" id="flux-is-html"
+                checked={Boolean(cfg.isHtml)}
+                onChange={(e) => onChange({ isHtml: e.target.checked })}
+                className="w-3.5 h-3.5 rounded accent-blue-500" />
+              <label htmlFor="flux-is-html" className="text-xs text-slate-500 dark:text-slate-400">
+                Body is HTML
+              </label>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ── Send Email ─────────────────────────────────────── */}
       {action === 'send' && (

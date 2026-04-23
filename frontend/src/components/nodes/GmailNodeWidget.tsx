@@ -34,10 +34,13 @@ export function GmailNodeWidget({ id, data, selected }: NodeProps<GmailNode>) {
     >
       {cfg.action && (
         <p className="text-[10px] text-slate-500 dark:text-slate-400">
-          <span className="font-semibold text-red-600 dark:text-red-400">
-            {cfg.action === 'send' ? 'Send' : cfg.action === 'list' ? 'List' : 'Read'}
+          <span className={`font-semibold ${cfg.action === 'send_flux' ? 'text-blue-600 dark:text-blue-400' : 'text-red-600 dark:text-red-400'}`}>
+            {cfg.action === 'send'      ? 'Send'
+            : cfg.action === 'send_flux' ? '⚡ Flux Send'
+            : cfg.action === 'list'     ? 'List'
+            : 'Read'}
           </span>
-          {cfg.action === 'send' && recipient && (
+          {(cfg.action === 'send' || cfg.action === 'send_flux') && recipient && (
             <span> → {recipient}{toCount > 1 ? ` +${toCount - 1}` : ''}</span>
           )}
           {cfg.action === 'list' && cfg.fromFilter && ` from:${cfg.fromFilter}`}
