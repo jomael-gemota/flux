@@ -88,6 +88,25 @@ export class BasecampNode implements NodeExecutor {
         this.auth = auth;
     }
 
+    /** Follows Basecamp's Link: rel="next" pagination headers and collects all pages. */
+    private async fetchAllPages(
+        startUrl: string,
+        headers: Record<string, string>,
+    ): Promise<Array<Record<string, unknown>>> {
+        const results: Array<Record<string, unknown>> = [];
+        let nextUrl: string | null = startUrl;
+        while (nextUrl) {
+            const r: Response = await fetch(nextUrl, { headers });
+            if (!r.ok) break;
+            const page = await r.json() as Array<Record<string, unknown>>;
+            results.push(...page);
+            const linkHeader: string = r.headers.get('Link') ?? '';
+            const nextMatch: RegExpMatchArray | null = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+            nextUrl = nextMatch ? nextMatch[1] : null;
+        }
+        return results;
+    }
+
     async execute(node: WorkflowNode, context: ExecutionContext): Promise<unknown> {
         const config = node.config as unknown as BasecampConfig;
         const { credentialId, action } = config;
@@ -118,9 +137,37 @@ export class BasecampNode implements NodeExecutor {
             // Strip JSON array brackets in case the variable resolved to e.g. "[123,456]"
             const normalizedAssignees = rawAssignees.replace(/^\[|\]$/g, '');
             // Split on any mix of commas, semicolons, or whitespace as delimiters
-            const assigneeIds = normalizedAssignees
-                ? normalizedAssignees.split(/[\s,;]+/).map((id) => Number(id.trim())).filter(Boolean)
+            const rawTokens = normalizedAssignees
+                ? normalizedAssignees.split(/[\s,;]+/).map((t) => t.trim()).filter(Boolean)
                 : [];
+
+            const assigneeIds: number[] = [];
+            if (rawTokens.length > 0) {
+                const emailTokens = rawTokens.filter((t) => t.includes('@'));
+                const idTokens    = rawTokens.filter((t) => !t.includes('@'));
+
+                // Numeric IDs — use directly
+                for (const t of idTokens) {
+                    const n = Number(t);
+                    if (n) assigneeIds.push(n);
+                }
+
+                // Email addresses — look up person IDs from the project's people list
+                if (emailTokens.length > 0) {
+                    const resolvedProjectId = this.resolver.resolveTemplate(config.projectId ?? '', context);
+                    const peoplePath = resolvedProjectId
+                        ? `/projects/${resolvedProjectId}/people.json`
+                        : '/people.json';
+                    const people = await this.fetchAllPages(`${baseUrl}${peoplePath}`, headers);
+                    const emailToId = new Map(
+                        people.map((p) => [(p.email_address as string ?? '').toLowerCase(), p.id as number])
+                    );
+                    for (const email of emailTokens) {
+                        const id = emailToId.get(email.toLowerCase());
+                        if (id) assigneeIds.push(id);
+                    }
+                }
+            }
 
             // ── optional file attachment ───────────────────────────────────────
             // When attachment fields are configured (typically from a preceding
@@ -276,24 +323,7 @@ export class BasecampNode implements NodeExecutor {
             const suffixes = [''];
             if (includeCompleted) suffixes.push('?completed=true');
 
-            // Paginated fetch that follows Basecamp's Link: <url>; rel="next" header
-            async function fetchAllPages(
-                startUrl: string,
-                hdrs: Record<string, string>,
-            ): Promise<Array<Record<string, unknown>>> {
-                const results: Array<Record<string, unknown>> = [];
-                let nextUrl: string | null = startUrl;
-                while (nextUrl) {
-                    const r: Response = await fetch(nextUrl, { headers: hdrs });
-                    if (!r.ok) break;
-                    const page = await r.json() as Array<Record<string, unknown>>;
-                    results.push(...page);
-                    const linkHeader: string = r.headers.get('Link') ?? '';
-                    const nextMatch: RegExpMatchArray | null = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
-                    nextUrl = nextMatch ? nextMatch[1] : null;
-                }
-                return results;
-            }
+            const fetchAllPages = this.fetchAllPages.bind(this);
 
             async function fetchTodos(
                 url: string,

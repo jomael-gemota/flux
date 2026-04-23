@@ -639,6 +639,7 @@ function ExpressionInput({
   nodes,
   testResults,
   hint,
+  autoSeparator,
 }: {
   label?: string;
   value: string;
@@ -647,6 +648,10 @@ function ExpressionInput({
   nodes: CanvasNode[];
   testResults: Record<string, NodeTestResult>;
   hint?: string;
+  /** When set, automatically inserts this separator before a new variable token
+   *  if there is already content before the cursor and it doesn't already end
+   *  with a separator character. Use e.g. ", " for comma-separated list fields. */
+  autoSeparator?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -657,11 +662,22 @@ function ExpressionInput({
   function handleInsert(expr: string) {
     setFocused(true);
     requestAnimationFrame(() => {
-      if (ref.current) {
-        ref.current.focus();
-        insertAtCursor(ref.current, expr, value, onChange);
+      const el = ref.current;
+      if (el) {
+        let toInsert = expr;
+        if (autoSeparator) {
+          const before = value.slice(0, el.selectionStart ?? value.length).trimEnd();
+          if (before.length > 0 && !/[,;]$/.test(before)) {
+            toInsert = autoSeparator + expr;
+          }
+        }
+        insertAtCursor(el, toInsert, value, onChange);
       } else {
-        onChange(value + expr);
+        const before = value.trimEnd();
+        const toInsert = (autoSeparator && before.length > 0 && !/[,;]$/.test(before))
+          ? autoSeparator + expr
+          : expr;
+        onChange(value + toInsert);
       }
     });
     setOpen(false);
@@ -8529,6 +8545,7 @@ function BasecampAssigneePicker({
           placeholder="Comma-separated person IDs or {{nodes.x.assigneeId}}"
           nodes={otherNodes}
           testResults={testResults}
+          autoSeparator=", "
         />
       </div>
     );
@@ -8582,6 +8599,7 @@ function BasecampAssigneePicker({
           nodes={otherNodes}
           testResults={testResults}
           hint="Enter a variable expression or comma-separated Basecamp person IDs."
+          autoSeparator=", "
         />
       ) : (
         <>
