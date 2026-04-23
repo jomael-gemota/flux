@@ -109,7 +109,7 @@ export class TriggerTestService {
                 _spreadsheetId: spreadsheetId,
                 _sheetName:     resolvedSheet,
             };
-            headers.forEach((h, j) => { obj[h || `col${j + 1}`] = row[j] ?? ''; });
+            headers.forEach((h, j) => { const key = h?.trim(); obj[key || `col${j + 1}`] = row[j] ?? ''; });
             return obj;
         };
 

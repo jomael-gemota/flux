@@ -277,7 +277,8 @@ export class GSheetsNode implements NodeExecutor {
             const data = dataRows.map((row) => {
                 const obj: Record<string, unknown> = {};
                 headers.forEach((h, i) => {
-                    if (!wantCols || wantCols.has(h)) obj[h] = row[i] ?? null;
+                    const key = h?.trim();
+                    if (!wantCols || wantCols.has(key)) obj[key] = row[i] ?? null;
                 });
                 return obj;
             });
@@ -394,7 +395,8 @@ export class GSheetsNode implements NodeExecutor {
             let data = dataRows.map((row) => {
                 const obj: Record<string, unknown> = {};
                 headers.forEach((h, i) => {
-                    if (!wantCols || wantCols.has(h)) obj[h] = row[i] ?? null;
+                    const key = h?.trim();
+                    if (!wantCols || wantCols.has(key)) obj[key] = row[i] ?? null;
                 });
                 return obj;
             });
