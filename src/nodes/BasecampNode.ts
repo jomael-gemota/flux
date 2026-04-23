@@ -107,6 +107,69 @@ export class BasecampNode implements NodeExecutor {
         return results;
     }
 
+    /**
+     * Returns `raw` unchanged when it is already a numeric Basecamp ID.
+     * Otherwise fetches all projects and returns the ID of the first project
+     * whose name matches `raw` (case-insensitive). Falls back to `raw` when
+     * no match is found so the API returns a clear error.
+     */
+    private async resolveProjectId(
+        raw: string,
+        baseUrl: string,
+        headers: Record<string, string>,
+    ): Promise<string> {
+        if (!raw || /^\d+$/.test(raw.trim())) return raw;
+        const projects = await this.fetchAllPages(`${baseUrl}/projects.json`, headers);
+        const needle   = raw.trim().toLowerCase();
+        const match    = projects.find((p) => String(p.name ?? '').toLowerCase() === needle);
+        return match ? String(match.id) : raw;
+    }
+
+    /**
+     * Returns `raw` unchanged when it is already a numeric Basecamp ID.
+     * Otherwise fetches the project's todoset todolists and returns the ID of
+     * the first todolist whose name matches `raw` (case-insensitive).
+     * Requires a resolved numeric `projectId`.
+     */
+    private async resolveTodolistId(
+        raw: string,
+        projectId: string,
+        baseUrl: string,
+        headers: Record<string, string>,
+    ): Promise<string> {
+        if (!raw || /^\d+$/.test(raw.trim())) return raw;
+        if (!projectId || !/^\d+$/.test(projectId.trim())) return raw;
+        const projRes = await fetch(`${baseUrl}/projects/${projectId}.json`, { headers });
+        if (!projRes.ok) return raw;
+        const project  = await projRes.json() as { dock: Array<{ name: string; id: number; enabled: boolean }> };
+        const todoset  = project.dock.find((d) => d.name === 'todoset' && d.enabled);
+        if (!todoset) return raw;
+        const todolists = await this.fetchAllPages(`${baseUrl}/todosets/${todoset.id}/todolists.json`, headers);
+        const needle    = raw.trim().toLowerCase();
+        const match     = todolists.find((tl) => String(tl.name ?? tl.title ?? '').toLowerCase() === needle);
+        return match ? String(match.id) : raw;
+    }
+
+    /**
+     * Returns `raw` unchanged when it is already a numeric Basecamp ID.
+     * Otherwise fetches the todolist's groups and returns the ID of the first
+     * group whose name/title matches `raw` (case-insensitive).
+     * Requires a resolved numeric `todolistId`.
+     */
+    private async resolveGroupId(
+        raw: string,
+        todolistId: string,
+        baseUrl: string,
+        headers: Record<string, string>,
+    ): Promise<string> {
+        if (!raw || /^\d+$/.test(raw.trim())) return raw;
+        if (!todolistId || !/^\d+$/.test(todolistId.trim())) return raw;
+        const groups = await this.fetchAllPages(`${baseUrl}/todolists/${todolistId}/groups.json`, headers);
+        const needle = raw.trim().toLowerCase();
+        const match  = groups.find((g) => String(g.name ?? g.title ?? '').toLowerCase() === needle);
+        return match ? String(match.id) : raw;
+    }
+
     async execute(node: WorkflowNode, context: ExecutionContext): Promise<unknown> {
         const config = node.config as unknown as BasecampConfig;
         const { credentialId, action } = config;
@@ -125,8 +188,16 @@ export class BasecampNode implements NodeExecutor {
         };
 
         if (action === 'create_todo') {
-            const todolistId = this.resolver.resolveTemplate(config.todolistId ?? '', context);
-            const groupId    = this.resolver.resolveTemplate(config.groupId ?? '', context);
+            // Resolve project → todolist → group, each supporting name or numeric ID
+            const projectId  = await this.resolveProjectId(
+                this.resolver.resolveTemplate(config.projectId  ?? '', context), baseUrl, headers,
+            );
+            const todolistId = await this.resolveTodolistId(
+                this.resolver.resolveTemplate(config.todolistId ?? '', context), projectId, baseUrl, headers,
+            );
+            const groupId    = await this.resolveGroupId(
+                this.resolver.resolveTemplate(config.groupId    ?? '', context), todolistId, baseUrl, headers,
+            );
             const content    = this.resolver.resolveTemplate(config.content ?? '', context);
             if (!todolistId) throw new Error('Basecamp create_todo: todolistId is required');
             if (!content)    throw new Error('Basecamp create_todo: content is required');
@@ -154,9 +225,8 @@ export class BasecampNode implements NodeExecutor {
 
                 // Email addresses — look up person IDs from the project's people list
                 if (emailTokens.length > 0) {
-                    const resolvedProjectId = this.resolver.resolveTemplate(config.projectId ?? '', context);
-                    const peoplePath = resolvedProjectId
-                        ? `/projects/${resolvedProjectId}/people.json`
+                    const peoplePath = projectId
+                        ? `/projects/${projectId}/people.json`
                         : '/people.json';
                     const people = await this.fetchAllPages(`${baseUrl}${peoplePath}`, headers);
                     const emailToId = new Map(
@@ -258,7 +328,9 @@ export class BasecampNode implements NodeExecutor {
         }
 
         if (action === 'post_message') {
-            const projectId = this.resolver.resolveTemplate(config.projectId ?? '', context);
+            const projectId = await this.resolveProjectId(
+                this.resolver.resolveTemplate(config.projectId ?? '', context), baseUrl, headers,
+            );
             const subject   = this.resolver.resolveTemplate(config.subject ?? '', context);
             const content   = this.resolver.resolveTemplate(config.text ?? '', context);
             if (!projectId) throw new Error('Basecamp post_message: projectId is required');
@@ -295,7 +367,9 @@ export class BasecampNode implements NodeExecutor {
         }
 
         if (action === 'send_campfire') {
-            const projectId = this.resolver.resolveTemplate(config.projectId ?? '', context);
+            const projectId = await this.resolveProjectId(
+                this.resolver.resolveTemplate(config.projectId ?? '', context), baseUrl, headers,
+            );
             const content   = this.resolver.resolveTemplate(config.text ?? '', context);
             if (!projectId) throw new Error('Basecamp send_campfire: projectId is required');
             if (!content)   throw new Error('Basecamp send_campfire: content is required');
@@ -315,8 +389,15 @@ export class BasecampNode implements NodeExecutor {
         }
 
         if (action === 'list_todos') {
-            const todolistId      = this.resolver.resolveTemplate(config.todolistId ?? '', context);
-            const groupId         = this.resolver.resolveTemplate(config.groupId ?? '', context);
+            const projectId  = await this.resolveProjectId(
+                this.resolver.resolveTemplate(config.projectId  ?? '', context), baseUrl, headers,
+            );
+            const todolistId = await this.resolveTodolistId(
+                this.resolver.resolveTemplate(config.todolistId ?? '', context), projectId, baseUrl, headers,
+            );
+            const groupId    = await this.resolveGroupId(
+                this.resolver.resolveTemplate(config.groupId    ?? '', context), todolistId, baseUrl, headers,
+            );
             const includeCompleted = Boolean(config.includeCompleted);
             if (!todolistId) throw new Error('Basecamp list_todos: todolistId is required');
 
