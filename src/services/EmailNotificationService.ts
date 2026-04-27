@@ -15,6 +15,7 @@ export interface ExecutionNotificationPayload {
     results: NodeResult[];
     nodeNamesById?: Record<string, string>;
     nodeTypesById?: Record<string, string>;
+    nodeProvidersById?: Record<string, string>;
 }
 
 /** @deprecated use ExecutionNotificationPayload */
@@ -158,10 +159,12 @@ function fieldIcon(label: string): string {
 }
 
 function iconLabel(icon: string, text: string): string {
-    return `<span style="display:inline-flex;align-items:center;gap:6px;">
-        <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:6px;background:#e0e7ff;font-size:12px;line-height:1;">${icon}</span>
-        <span>${text}</span>
-    </span>`;
+    return `<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;display:inline-table;vertical-align:middle;">
+        <tr>
+            <td style="width:18px;height:18px;border-radius:6px;background:#e0e7ff;font-size:12px;line-height:18px;text-align:center;">${icon}</td>
+            <td style="padding-left:6px;vertical-align:middle;">${text}</td>
+        </tr>
+    </table>`;
 }
 
 function nodeDisplayName(nodeId: string, nodeNamesById?: Record<string, string>): string {
@@ -175,7 +178,41 @@ function nodeTypeFor(nodeId: string, nodeTypesById?: Record<string, string>): st
     return nodeTypesById?.[nodeId] ?? 'unknown';
 }
 
-function nodeLogoBadge(nodeId: string, nodeTypesById?: Record<string, string>): string {
+function publicAssetUrl(path: string): string {
+    const appUrl = process.env.APP_URL ?? 'http://localhost:3000';
+    return `${appUrl.replace(/\/+$/, '')}${path}`;
+}
+
+function nodeLogoSrc(
+    nodeId: string,
+    nodeTypesById?: Record<string, string>,
+    nodeProvidersById?: Record<string, string>,
+): string | null {
+    const type = nodeTypeFor(nodeId, nodeTypesById);
+    if (type === 'llm') {
+        const provider = (nodeProvidersById?.[nodeId] ?? 'openai').toLowerCase();
+        if (provider === 'anthropic') return publicAssetUrl('/logos/anthropic.png');
+        if (provider === 'meta') return publicAssetUrl('/logos/meta.png');
+        if (provider === 'gemini') return publicAssetUrl('/logos/gemini.svg');
+        if (provider === 'openai') return publicAssetUrl('/logos/openai.png');
+        return null;
+    }
+
+    const map: Record<string, string> = {
+        gmail: '/logos/gmail-removebg-preview.png',
+        gdrive: '/logos/gdrive-removebg-preview.png',
+        gdocs: '/logos/gdocs-removebg-preview.png',
+        gsheets: '/logos/gsheets-removebg-preview.png',
+        slack: '/logos/slack.svg',
+        teams: '/logos/ms-teams.png',
+        basecamp: '/logos/basecamp.png',
+    };
+    const file = map[type];
+    if (!file) return null;
+    return publicAssetUrl(file);
+}
+
+function fallbackNodeBadge(nodeId: string, nodeTypesById?: Record<string, string>): string {
     const type = nodeTypeFor(nodeId, nodeTypesById);
     const map: Record<string, { icon: string; bg: string; fg: string }> = {
         trigger: { icon: '⚡', bg: '#fef3c7', fg: '#92400e' },
@@ -186,30 +223,32 @@ function nodeLogoBadge(nodeId: string, nodeTypesById?: Record<string, string>): 
         transform: { icon: '✦', bg: '#ede9fe', fg: '#5b21b6' },
         formatter: { icon: '✎', bg: '#ede9fe', fg: '#5b21b6' },
         output: { icon: '🏁', bg: '#dcfce7', fg: '#166534' },
-        gmail: { icon: '✉', bg: '#fee2e2', fg: '#b91c1c' },
-        gdrive: { icon: '△', bg: '#dcfce7', fg: '#166534' },
-        gdocs: { icon: '▦', bg: '#dbeafe', fg: '#1d4ed8' },
-        gsheets: { icon: '▤', bg: '#dcfce7', fg: '#166534' },
-        slack: { icon: 'S', bg: '#fce7f3', fg: '#9d174d' },
-        teams: { icon: 'T', bg: '#ede9fe', fg: '#5b21b6' },
-        basecamp: { icon: 'B', bg: '#dcfce7', fg: '#166534' },
         runner: { icon: '⚙', bg: '#e2e8f0', fg: '#334155' },
         unknown: { icon: '•', bg: '#f1f5f9', fg: '#475569' },
     };
     const badge = map[type] ?? map.unknown;
-    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:${badge.bg};color:${badge.fg};font-size:12px;font-weight:700;line-height:1;flex-shrink:0;">${badge.icon}</span>`;
+    return `<span style="display:inline-block;width:24px;height:24px;border-radius:7px;background:${badge.bg};color:${badge.fg};font-size:12px;font-weight:700;line-height:24px;text-align:center;margin-right:8px;vertical-align:top;">${badge.icon}</span>`;
 }
 
-function nodeDisplayCell(nodeId: string, nodeNamesById?: Record<string, string>, nodeTypesById?: Record<string, string>): string {
+function nodeDisplayCell(
+    nodeId: string,
+    nodeNamesById?: Record<string, string>,
+    nodeTypesById?: Record<string, string>,
+    nodeProvidersById?: Record<string, string>,
+): string {
     const name = nodeDisplayName(nodeId, nodeNamesById);
     const type = nodeTypeFor(nodeId, nodeTypesById);
+    const logoSrc = nodeLogoSrc(nodeId, nodeTypesById, nodeProvidersById);
     const nameContent = name === nodeId
         ? `<strong style="font-size:13px;color:#111827;">${escHtml(name)}</strong>`
         : `<strong style="font-size:13px;color:#111827;">${escHtml(name)}</strong>
            <div style="font-size:11px;color:#6b7280;margin-top:2px;">ID: ${escHtml(nodeId)} · Type: ${escHtml(type)}</div>`;
-    return `<div style="display:flex;align-items:flex-start;gap:8px;">
-        ${nodeLogoBadge(nodeId, nodeTypesById)}
-        <div>${nameContent}</div>
+    const logo = logoSrc
+        ? `<img src="${escHtml(logoSrc)}" alt="${escHtml(type)} logo" width="24" height="24" style="width:24px;height:24px;object-fit:contain;display:inline-block;margin-right:8px;vertical-align:top;" />`
+        : fallbackNodeBadge(nodeId, nodeTypesById);
+    return `<div style="display:block;">
+        ${logo}
+        <span style="display:inline-block;vertical-align:top;max-width:calc(100% - 36px);">${nameContent}</span>
     </div>`;
 }
 
@@ -217,6 +256,7 @@ function nodeResultRows(
     results: NodeResult[],
     nodeNamesById?: Record<string, string>,
     nodeTypesById?: Record<string, string>,
+    nodeProvidersById?: Record<string, string>,
 ): string {
     return results
         .map((r) => {
@@ -225,7 +265,7 @@ function nodeResultRows(
                 : '<span style="color:#94a3b8;">No error details</span>';
             return `
         <tr style="border-bottom:1px solid #f1f5f9;">
-          <td style="padding:10px 12px;vertical-align:top;">${nodeDisplayCell(r.nodeId, nodeNamesById, nodeTypesById)}</td>
+          <td style="padding:10px 12px;vertical-align:top;">${nodeDisplayCell(r.nodeId, nodeNamesById, nodeTypesById, nodeProvidersById)}</td>
           <td style="padding:10px 12px;vertical-align:top;text-align:center;">${statusBadge(r.status, true)}</td>
           <td style="padding:10px 12px;vertical-align:top;text-align:right;white-space:nowrap;color:#64748b;font-size:12px;">${formatDuration(r.durationMs)}</td>
           <td style="padding:10px 12px;vertical-align:top;">${errorCell}</td>
@@ -318,7 +358,7 @@ function buildEmailHtml(p: ExecutionNotificationPayload, recipientTimeZone: stri
             <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#6b7280;border-bottom:1px solid #e5e7eb;">Details</th>
           </tr>
         </thead>
-        <tbody>${nodeResultRows(p.results, p.nodeNamesById, p.nodeTypesById)}</tbody>
+        <tbody>${nodeResultRows(p.results, p.nodeNamesById, p.nodeTypesById, p.nodeProvidersById)}</tbody>
       </table>
 
       <div style="margin-top:20px;font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.4px;">
@@ -385,7 +425,9 @@ function buildEmailText(p: ExecutionNotificationPayload, recipientTimeZone: stri
     for (const r of p.results) {
         const label = `${nodeDisplayName(r.nodeId, p.nodeNamesById)} (ID: ${r.nodeId})`;
         const type = nodeTypeFor(r.nodeId, p.nodeTypesById);
-        lines.push(`  ${label} [${type}] — ${r.status.toUpperCase()} — ${formatDuration(r.durationMs)}${r.error ? ` — ${r.error}` : ''}`);
+        const provider = type === 'llm' ? (p.nodeProvidersById?.[r.nodeId] ?? 'openai') : '';
+        const typeText = type === 'llm' ? `${type}:${provider}` : type;
+        lines.push(`  ${label} [${typeText}] — ${r.status.toUpperCase()} — ${formatDuration(r.durationMs)}${r.error ? ` — ${r.error}` : ''}`);
     }
 
     return lines.join('\n');

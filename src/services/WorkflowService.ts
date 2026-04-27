@@ -26,6 +26,9 @@ export class WorkflowService {
         if (!workflow) throw new Error(`Workflow ${workflowId} not found`);
         const nodeNamesById = Object.fromEntries(workflow.nodes.map((node) => [node.id, node.name]));
         const nodeTypesById = Object.fromEntries(workflow.nodes.map((node) => [node.id, node.type]));
+        const nodeProvidersById = Object.fromEntries(
+            workflow.nodes.map((node) => [node.id, (node.config as { provider?: string })?.provider ?? ''])
+        );
 
         const startedAt = new Date();
         const executionId = crypto.randomUUID();
@@ -90,6 +93,7 @@ export class WorkflowService {
                     results: result.results,
                     nodeNamesById,
                     nodeTypesById,
+                    nodeProvidersById,
                 }).catch((err) => console.error('[WorkflowService] Email notification error:', err));
             }
 
@@ -127,6 +131,7 @@ export class WorkflowService {
                 results: [syntheticResult],
                 nodeNamesById,
                 nodeTypesById,
+                nodeProvidersById,
             }).catch((err) => console.error('[WorkflowService] Email notification error:', err));
 
             return {

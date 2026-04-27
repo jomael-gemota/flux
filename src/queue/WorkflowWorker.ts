@@ -23,6 +23,9 @@ export function createWorkflowWorker(
             if (!workflow) throw new Error(`Workflow ${workflowId} not found`);
             const nodeNamesById = Object.fromEntries(workflow.nodes.map((node) => [node.id, node.name]));
             const nodeTypesById = Object.fromEntries(workflow.nodes.map((node) => [node.id, node.type]));
+            const nodeProvidersById = Object.fromEntries(
+                workflow.nodes.map((node) => [node.id, (node.config as { provider?: string })?.provider ?? ''])
+            );
 
             await executionRepo.markRunning(executionId);
             const startedAt = new Date();
@@ -55,6 +58,7 @@ export function createWorkflowWorker(
                     results,
                     nodeNamesById,
                     nodeTypesById,
+                    nodeProvidersById,
                 }).catch((err) => console.error('[Worker] Email notification error:', err));
             }
         },
@@ -93,6 +97,7 @@ export function createWorkflowWorker(
                     results: [syntheticResult],
                     nodeNamesById: Object.fromEntries(workflow.nodes.map((node) => [node.id, node.name])),
                     nodeTypesById: Object.fromEntries(workflow.nodes.map((node) => [node.id, node.type])),
+                    nodeProvidersById: Object.fromEntries(workflow.nodes.map((node) => [node.id, (node.config as { provider?: string })?.provider ?? ''])),
                 }).catch(() => {});
             }
         }
