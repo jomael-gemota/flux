@@ -173,6 +173,33 @@ function nodeDisplayName(nodeId: string, nodeNamesById?: Record<string, string>)
     return found || `Step ${nodeId}`;
 }
 
+function skippedNodeList(
+    results: NodeResult[],
+    nodeNamesById?: Record<string, string>,
+    nodeTypesById?: Record<string, string>,
+): string {
+    const skipped = results.filter((r) => r.status === 'skipped');
+    if (skipped.length === 0) return '';
+
+    const items = skipped.map((r) => {
+        const name = nodeDisplayName(r.nodeId, nodeNamesById);
+        const type = nodeTypeFor(r.nodeId, nodeTypesById);
+        return `<li style="margin:0 0 6px;color:#374151;font-size:13px;line-height:1.5;">
+            <strong>${escHtml(name)}</strong>
+            <span style="color:#6b7280;"> (ID: ${escHtml(r.nodeId)} · Type: ${escHtml(type)})</span>
+        </li>`;
+    }).join('');
+
+    return `
+      <div style="margin-top:14px;padding:12px;border:1px solid #cbd5e1;border-radius:10px;background:#f8fafc;">
+        <div style="font-size:12px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">
+          Skipped Steps (${skipped.length})
+        </div>
+        <ul style="margin:0;padding:0 0 0 18px;">${items}</ul>
+      </div>
+    `;
+}
+
 function nodeTypeFor(nodeId: string, nodeTypesById?: Record<string, string>): string {
     if (nodeId === '__runner__') return 'runner';
     return nodeTypesById?.[nodeId] ?? 'unknown';
@@ -360,6 +387,7 @@ function buildEmailHtml(p: ExecutionNotificationPayload, recipientTimeZone: stri
         </thead>
         <tbody>${nodeResultRows(p.results, p.nodeNamesById, p.nodeTypesById, p.nodeProvidersById)}</tbody>
       </table>
+      ${skippedNodeList(p.results, p.nodeNamesById, p.nodeTypesById)}
 
       <div style="margin-top:20px;font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.4px;">
         Reference IDs
@@ -385,6 +413,7 @@ function buildEmailHtml(p: ExecutionNotificationPayload, recipientTimeZone: stri
 
 function buildEmailText(p: ExecutionNotificationPayload, recipientTimeZone: string): string {
     const failedNodes = p.results.filter((r) => r.status === 'failure');
+    const skippedNodes = p.results.filter((r) => r.status === 'skipped');
     const localTime = p.startedAt.toLocaleString('en-US', {
         year: 'numeric', month: 'long', day: 'numeric',
         hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -416,6 +445,16 @@ function buildEmailText(p: ExecutionNotificationPayload, recipientTimeZone: stri
             lines.push(`  Step: ${nodeDisplayName(n.nodeId, p.nodeNamesById)} (ID: ${n.nodeId})`);
             lines.push(`  Duration: ${formatDuration(n.durationMs)}`);
             lines.push(`  Error: ${n.error ?? 'unknown'}`);
+            lines.push('');
+        }
+    }
+
+    if (skippedNodes.length > 0) {
+        lines.push('SKIPPED NODES');
+        lines.push('-'.repeat(40));
+        for (const n of skippedNodes) {
+            lines.push(`  Step: ${nodeDisplayName(n.nodeId, p.nodeNamesById)} (ID: ${n.nodeId})`);
+            lines.push(`  Type: ${nodeTypeFor(n.nodeId, p.nodeTypesById)}`);
             lines.push('');
         }
     }
