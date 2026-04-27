@@ -173,29 +173,82 @@ function nodeDisplayName(nodeId: string, nodeNamesById?: Record<string, string>)
     return found || `Step ${nodeId}`;
 }
 
+function notReachedSection(
+    results: NodeResult[],
+    nodeNamesById?: Record<string, string>,
+    nodeTypesById?: Record<string, string>,
+    nodeProvidersById?: Record<string, string>,
+): string {
+    if (!nodeNamesById) return '';
+
+    const reachedIds = new Set(results.map((r) => r.nodeId));
+    // Exclude the synthetic runner node — it has no entry in nodeNamesById
+    const notReached = Object.keys(nodeNamesById).filter((id) => !reachedIds.has(id));
+    if (notReached.length === 0) return '';
+
+    const rows = notReached.map((nodeId) => `
+        <tr style="border-bottom:1px solid #fde8d0;background:#fffbf7;">
+          <td style="padding:10px 12px;vertical-align:top;">${nodeDisplayCell(nodeId, nodeNamesById, nodeTypesById, nodeProvidersById)}</td>
+          <td style="padding:10px 12px;vertical-align:top;text-align:center;">
+            <span style="display:inline-block;padding:2px 8px;border-radius:9999px;background:#fed7aa;color:#92400e;font-size:12px;font-weight:700;">Not Run</span>
+          </td>
+          <td style="padding:10px 12px;vertical-align:top;font-size:12px;color:#92400e;font-style:italic;" colspan="2">
+            Not executed — the workflow stopped before reaching this step.
+          </td>
+        </tr>`).join('');
+
+    return `
+      <div style="margin-top:16px;">
+        <div style="font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">
+          <span style="display:inline-block;background:#fed7aa;color:#92400e;border-radius:9999px;padding:1px 8px;font-size:11px;">🚫 Not Reached — ${notReached.length}</span>
+        </div>
+        <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #fdba74;border-radius:10px;overflow:hidden;border-collapse:separate;border-spacing:0;">
+          <thead>
+            <tr style="background:#fff7ed;">
+              <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:700;color:#92400e;border-bottom:1px solid #fdba74;">Step</th>
+              <th style="padding:9px 12px;text-align:center;font-size:11px;font-weight:700;color:#92400e;border-bottom:1px solid #fdba74;">Result</th>
+              <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:700;color:#92400e;border-bottom:1px solid #fdba74;" colspan="2">Reason</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+}
+
 function skippedNodeList(
     results: NodeResult[],
     nodeNamesById?: Record<string, string>,
     nodeTypesById?: Record<string, string>,
+    nodeProvidersById?: Record<string, string>,
 ): string {
     const skipped = results.filter((r) => r.status === 'skipped');
     if (skipped.length === 0) return '';
 
-    const items = skipped.map((r) => {
-        const name = nodeDisplayName(r.nodeId, nodeNamesById);
-        const type = nodeTypeFor(r.nodeId, nodeTypesById);
-        return `<li style="margin:0 0 6px;color:#374151;font-size:13px;line-height:1.5;">
-            <strong>${escHtml(name)}</strong>
-            <span style="color:#6b7280;"> (ID: ${escHtml(r.nodeId)} · Type: ${escHtml(type)})</span>
-        </li>`;
-    }).join('');
+    const rows = skipped.map((r) => `
+        <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;">
+          <td style="padding:10px 12px;vertical-align:top;">${nodeDisplayCell(r.nodeId, nodeNamesById, nodeTypesById, nodeProvidersById)}</td>
+          <td style="padding:10px 12px;vertical-align:top;text-align:center;">${statusBadge('skipped', true)}</td>
+          <td style="padding:10px 12px;vertical-align:top;font-size:12px;color:#64748b;font-style:italic;" colspan="2">
+            This step was not executed because its branch was not taken.
+          </td>
+        </tr>`).join('');
 
     return `
-      <div style="margin-top:14px;padding:12px;border:1px solid #cbd5e1;border-radius:10px;background:#f8fafc;">
-        <div style="font-size:12px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">
-          Skipped Steps (${skipped.length})
+      <div style="margin-top:16px;">
+        <div style="font-size:12px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+          <span style="display:inline-block;background:#e2e8f0;color:#475569;border-radius:9999px;padding:1px 8px;font-size:11px;">⏭ Skipped Steps — ${skipped.length}</span>
         </div>
-        <ul style="margin:0;padding:0 0 0 18px;">${items}</ul>
+        <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #cbd5e1;border-radius:10px;overflow:hidden;border-collapse:separate;border-spacing:0;">
+          <thead>
+            <tr style="background:#f1f5f9;">
+              <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #cbd5e1;">Step</th>
+              <th style="padding:9px 12px;text-align:center;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #cbd5e1;">Result</th>
+              <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #cbd5e1;" colspan="2">Reason</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
       </div>
     `;
 }
@@ -287,15 +340,22 @@ function nodeResultRows(
 ): string {
     return results
         .map((r) => {
-            const errorCell = r.error
-                ? `<span style="color:#b91c1c;font-size:12px;line-height:1.5;word-break:break-word;">${escHtml(r.error)}</span>`
-                : '<span style="color:#94a3b8;">No error details</span>';
+            const isSkipped = r.status === 'skipped';
+            const rowBg = isSkipped ? 'background:#f8fafc;' : '';
+            const detailsCell = isSkipped
+                ? `<span style="color:#64748b;font-size:12px;font-style:italic;">Not executed — step was skipped</span>`
+                : r.error
+                    ? `<span style="color:#b91c1c;font-size:12px;line-height:1.5;word-break:break-word;">${escHtml(r.error)}</span>`
+                    : `<span style="color:#94a3b8;font-size:12px;">—</span>`;
+            const timeCell = isSkipped
+                ? `<span style="color:#94a3b8;font-size:12px;">—</span>`
+                : `<span style="color:#64748b;font-size:12px;">${formatDuration(r.durationMs)}</span>`;
             return `
-        <tr style="border-bottom:1px solid #f1f5f9;">
+        <tr style="border-bottom:1px solid #f1f5f9;${rowBg}">
           <td style="padding:10px 12px;vertical-align:top;">${nodeDisplayCell(r.nodeId, nodeNamesById, nodeTypesById, nodeProvidersById)}</td>
           <td style="padding:10px 12px;vertical-align:top;text-align:center;">${statusBadge(r.status, true)}</td>
-          <td style="padding:10px 12px;vertical-align:top;text-align:right;white-space:nowrap;color:#64748b;font-size:12px;">${formatDuration(r.durationMs)}</td>
-          <td style="padding:10px 12px;vertical-align:top;">${errorCell}</td>
+          <td style="padding:10px 12px;vertical-align:top;text-align:right;white-space:nowrap;">${timeCell}</td>
+          <td style="padding:10px 12px;vertical-align:top;">${detailsCell}</td>
         </tr>`;
         })
         .join('');
@@ -339,10 +399,20 @@ function buildEmailHtml(p: ExecutionNotificationPayload, recipientTimeZone: stri
                 ? `${failedNodes.length} of ${p.results.length} steps failed.`
                 : `${failedNodes.length} step${failedNodes.length === 1 ? '' : 's'} failed and the workflow stopped.`;
 
+    const notReachedCount = p.nodeNamesById
+        ? Object.keys(p.nodeNamesById).filter((id) => !p.results.some((r) => r.nodeId === id)).length
+        : 0;
+    const stepsDetail = [
+        `${successNodes.length} succeeded`,
+        failedNodes.length > 0 ? `${failedNodes.length} failed` : '',
+        skippedNodes.length > 0 ? `${skippedNodes.length} skipped` : '',
+        notReachedCount > 0 ? `${notReachedCount} not reached` : '',
+    ].filter(Boolean).join(', ');
+
     const summaryRows = [
         [iconLabel(fieldIcon('workflow'), 'Workflow'), escHtml(p.workflowName)],
         [iconLabel(fieldIcon('status'), 'Status'), `<span style="color:${statusColor};font-weight:700;">${escHtml(statusHeading(p.status))}</span>`],
-        [iconLabel(fieldIcon('steps'), 'Steps'), `${successNodes.length} succeeded, ${failedNodes.length} failed, ${skippedNodes.length} skipped`],
+        [iconLabel(fieldIcon('steps'), 'Steps'), escHtml(stepsDetail)],
         [iconLabel(fieldIcon('triggeredBy'), 'Triggered by'), escHtml(triggeredByLabel(p.triggeredBy))],
         [iconLabel(fieldIcon('dateTime'), 'Date and time'), `${escHtml(localTime)} <span style="color:#6b7280;">(${escHtml(recipientTimeZone)})</span>`],
         [iconLabel(fieldIcon('duration'), 'Duration'), escHtml(formatDuration(wallClock))],
@@ -387,7 +457,8 @@ function buildEmailHtml(p: ExecutionNotificationPayload, recipientTimeZone: stri
         </thead>
         <tbody>${nodeResultRows(p.results, p.nodeNamesById, p.nodeTypesById, p.nodeProvidersById)}</tbody>
       </table>
-      ${skippedNodeList(p.results, p.nodeNamesById, p.nodeTypesById)}
+      ${skippedNodeList(p.results, p.nodeNamesById, p.nodeTypesById, p.nodeProvidersById)}
+      ${notReachedSection(p.results, p.nodeNamesById, p.nodeTypesById, p.nodeProvidersById)}
 
       <div style="margin-top:20px;font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.4px;">
         Reference IDs
@@ -456,6 +527,21 @@ function buildEmailText(p: ExecutionNotificationPayload, recipientTimeZone: stri
             lines.push(`  Step: ${nodeDisplayName(n.nodeId, p.nodeNamesById)} (ID: ${n.nodeId})`);
             lines.push(`  Type: ${nodeTypeFor(n.nodeId, p.nodeTypesById)}`);
             lines.push('');
+        }
+    }
+
+    if (p.nodeNamesById) {
+        const reachedIds = new Set(p.results.map((r) => r.nodeId));
+        const notReached = Object.keys(p.nodeNamesById).filter((id) => !reachedIds.has(id));
+        if (notReached.length > 0) {
+            lines.push('NOT REACHED (workflow stopped before these steps ran)');
+            lines.push('-'.repeat(40));
+            for (const nodeId of notReached) {
+                lines.push(`  Step: ${nodeDisplayName(nodeId, p.nodeNamesById)} (ID: ${nodeId})`);
+                lines.push(`  Type: ${nodeTypeFor(nodeId, p.nodeTypesById)}`);
+                lines.push(`  Reason: Workflow stopped due to an earlier failure`);
+                lines.push('');
+            }
         }
     }
 
