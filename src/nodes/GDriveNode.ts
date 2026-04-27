@@ -68,6 +68,16 @@ interface GDriveConfig {
     parentFolderId?: string;        // parent for new folder
 }
 
+/**
+ * Returns true when a resolved template value is the ExpressionResolver's
+ * "[missing: …]" sentinel, meaning the upstream node produced no value for
+ * the referenced field.  We treat these exactly like an empty string so that
+ * the skipIfEmpty guard can catch them before making any Drive API call.
+ */
+function isMissingSentinel(s: string): boolean {
+    return s.trimStart().startsWith('[missing:');
+}
+
 /** Infer a MIME type from a filename extension. */
 function guessMime(filename: string): string {
     const ext = (filename.split('.').pop() ?? '').toLowerCase();
@@ -354,7 +364,10 @@ export class GDriveNode implements NodeExecutor {
             if (config.driveUrl) {
                 // Accept a full Drive share URL — extract the file ID automatically
                 const rawUrl = this.resolver.resolveTemplate(config.driveUrl, context).trim();
-                if (!rawUrl && skipIfEmpty) return skipped();
+                if ((!rawUrl || isMissingSentinel(rawUrl)) && skipIfEmpty) return skipped();
+                if (!rawUrl || isMissingSentinel(rawUrl)) {
+                    throw new Error('Google Drive download: could not extract a file ID from the provided Drive URL');
+                }
                 fileId = extractDriveFileId(rawUrl);
                 if (!fileId) {
                     if (skipIfEmpty) return skipped();
@@ -366,7 +379,10 @@ export class GDriveNode implements NodeExecutor {
                     ? this.resolver.resolveTemplate(config.downloadFolderId, context)
                     : 'root';
                 const dlFileName = this.resolver.resolveTemplate(config.downloadFileName, context).trim();
-                if (!dlFileName && skipIfEmpty) return skipped();
+                if ((!dlFileName || isMissingSentinel(dlFileName)) && skipIfEmpty) return skipped();
+                if (!dlFileName || isMissingSentinel(dlFileName)) {
+                    throw new Error('Google Drive download: downloadFileName resolved to an empty value');
+                }
                 const q = `'${driveEscape(dlFolderId)}' in parents and name contains '${driveEscape(dlFileName)}' and trashed = false`;
 
                 const searchRes = await drive.files.list({
@@ -384,7 +400,7 @@ export class GDriveNode implements NodeExecutor {
                 fileId = config.fileId
                     ? this.resolver.resolveTemplate(config.fileId, context)
                     : '';
-                if (!fileId) {
+                if (!fileId || isMissingSentinel(fileId)) {
                     if (skipIfEmpty) return skipped();
                     throw new Error('Google Drive download: provide a Drive URL, a folder + filename, or a File ID');
                 }
