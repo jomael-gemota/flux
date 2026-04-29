@@ -1,16 +1,18 @@
 import { NotificationSettingsModel, type NotificationSettingsDocument } from '../db/models/NotificationSettingsModel';
 
-const RECORD_KEY = 'settings';
-
 export class NotificationSettingsRepository {
     /**
      * Return the notification settings for a specific user, auto-creating a
      * fresh default record on first access so callers never receive null.
+     *
+     * `key` is set equal to `userId` so that each document has a unique `key`
+     * value.  This keeps the legacy `{ key: 1, unique: true }` MongoDB index
+     * satisfied without requiring a manual index migration.
      */
     async get(userId: string): Promise<NotificationSettingsDocument> {
-        const existing = await NotificationSettingsModel.findOne({ key: RECORD_KEY, userId });
+        const existing = await NotificationSettingsModel.findOne({ userId });
         if (existing) return existing;
-        return NotificationSettingsModel.create({ key: RECORD_KEY, userId });
+        return NotificationSettingsModel.create({ key: userId, userId });
     }
 
     async update(
@@ -24,8 +26,8 @@ export class NotificationSettingsRepository {
         userId: string,
     ): Promise<NotificationSettingsDocument> {
         const doc = await NotificationSettingsModel.findOneAndUpdate(
-            { key: RECORD_KEY, userId },
-            { $set: patch },
+            { userId },
+            { $set: patch, $setOnInsert: { key: userId } },
             { new: true, upsert: true },
         );
         return doc!;

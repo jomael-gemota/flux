@@ -1,7 +1,12 @@
 import { Schema, model, Document } from 'mongoose';
 
 export interface NotificationSettingsDocument extends Document {
-    /** Logical record type — always "settings". Combined with userId forms the unique key. */
+    /**
+     * Set to the owning user's MongoDB ObjectId string on creation (mirrors userId).
+     * This field exists solely to stay compatible with the legacy `{ key: 1, unique: true }`
+     * MongoDB index that was created when the collection used a global singleton pattern.
+     * Because key === userId, the old index is always satisfied without a manual migration.
+     */
     key: string;
     /** MongoDB ObjectId string of the owning user. One settings document per user. */
     userId: string;
@@ -19,7 +24,7 @@ export interface NotificationSettingsDocument extends Document {
 
 const NotificationSettingsSchema = new Schema<NotificationSettingsDocument>(
     {
-        key:             { type: String, required: true, default: 'settings' },
+        key:             { type: String, required: true },
         userId:          { type: String, required: true },
         enabled:         { type: Boolean, required: true, default: false },
         notifyOnFailure: { type: Boolean, required: true, default: true },
