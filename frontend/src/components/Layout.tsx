@@ -2,6 +2,7 @@ import { type ReactNode, useEffect } from 'react';
 import { ScrollText, ChevronUp, ChevronDown, Loader2 } from 'lucide-react';
 import { Toolbar } from './Toolbar';
 import { WorkflowSidebar } from './WorkflowSidebar';
+import { CanvasActionDock } from './canvas/CanvasActionDock';
 import { useWorkflowStore } from '../store/workflowStore';
 import { useResizablePanel } from '../hooks/useResizablePanel';
 import { ProductTour } from './ui/ProductTour';
@@ -65,6 +66,9 @@ export function Layout({ canvas, configPanel, executionLog }: LayoutProps) {
           {/* Canvas — fills all remaining vertical space */}
           <div className="flex-1 min-h-0 relative">
             {canvas}
+
+            {/* Floating action dock — bottom-centre of the canvas */}
+            <CanvasActionDock />
 
             {/* Workflow-switch loading overlay — shown while the previous workflow is being saved */}
             {isSwitchingWorkflow && (
