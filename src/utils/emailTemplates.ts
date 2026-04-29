@@ -98,7 +98,7 @@ export function buildFluxMessageHtml(subject: string, bodyContent: string, isHtm
       <table width="900" cellpadding="0" cellspacing="0" role="presentation"
              style="background:#ffffff;border-radius:16px;overflow:hidden;
                     box-shadow:0 6px 24px rgba(15,23,42,0.08);
-                    max-width:690px;width:100%;">
+                    max-width:900px;width:100%;">
 
         <!-- Brand header -->
         <tr>
