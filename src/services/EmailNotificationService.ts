@@ -128,12 +128,6 @@ function statusHeading(status: ExecutionNotificationPayload['status']): string {
     return 'Workflow execution failed';
 }
 
-function statusBannerIcon(status: ExecutionNotificationPayload['status']): string {
-    if (status === 'success') return '✅';
-    if (status === 'partial') return '⚠️';
-    return '❌';
-}
-
 function triggeredByLabel(triggeredBy: string): string {
     const map: Record<string, string> = {
         api: 'API call',
@@ -340,6 +334,71 @@ function nodeResultRows(
     nodeTypesById?: Record<string, string>,
     nodeProvidersById?: Record<string, string>,
 ): string {
+    const truncate = (value: string, max = 220): string =>
+        value.length > max ? `${value.slice(0, max - 1)}…` : value;
+
+    const shortValue = (value: unknown, max = 120): string => {
+        if (value === null || value === undefined) return 'empty';
+        if (typeof value === 'string') return truncate(value, max);
+        if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+        try {
+            return truncate(JSON.stringify(value), max);
+        } catch {
+            return 'complex value';
+        }
+    };
+
+    const successDetailsCell = (output: unknown): string => {
+        if (output === null || output === undefined) {
+            return `<span style="color:#0f766e;font-size:12px;line-height:1.5;">Completed successfully. No output data was returned.</span>`;
+        }
+
+        if (typeof output === 'string' || typeof output === 'number' || typeof output === 'boolean') {
+            return `<div style="font-size:12px;line-height:1.5;color:#0f766e;">
+                <div style="font-weight:600;color:#166534;margin-bottom:4px;">Completed successfully</div>
+                <div>${escHtml(shortValue(output, 260))}</div>
+            </div>`;
+        }
+
+        if (Array.isArray(output)) {
+            const items = output.slice(0, 3).map((item, i) =>
+                `<li style="margin:0 0 2px;">Item ${i + 1}: <span style="color:#166534;">${escHtml(shortValue(item, 170))}</span></li>`,
+            ).join('');
+            const more = output.length > 3
+                ? `<div style="margin-top:4px;color:#64748b;font-size:11px;">+${output.length - 3} more item(s)</div>`
+                : '';
+            return `<div style="font-size:12px;line-height:1.5;color:#0f766e;">
+                <div style="font-weight:600;color:#166534;margin-bottom:4px;">Completed successfully</div>
+                <div>Returned ${output.length} item${output.length === 1 ? '' : 's'}.</div>
+                ${items ? `<ul style="margin:6px 0 0 16px;padding:0;color:#0f766e;">${items}</ul>` : ''}
+                ${more}
+            </div>`;
+        }
+
+        if (typeof output === 'object') {
+            const entries = Object.entries(output as Record<string, unknown>);
+            if (entries.length === 0) {
+                return `<span style="color:#0f766e;font-size:12px;line-height:1.5;">Completed successfully. Returned an empty object.</span>`;
+            }
+            const previewRows = entries.slice(0, 6).map(([key, val]) => `
+                <tr>
+                  <td style="padding:2px 8px 2px 0;color:#64748b;font-size:11px;white-space:nowrap;vertical-align:top;">${escHtml(key)}</td>
+                  <td style="padding:2px 0;color:#166534;font-size:12px;word-break:break-word;">${escHtml(shortValue(val, 150))}</td>
+                </tr>
+            `).join('');
+            const more = entries.length > 6
+                ? `<div style="margin-top:4px;color:#64748b;font-size:11px;">+${entries.length - 6} more field(s)</div>`
+                : '';
+            return `<div style="font-size:12px;line-height:1.5;color:#0f766e;">
+                <div style="font-weight:600;color:#166534;margin-bottom:4px;">Completed successfully</div>
+                <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${previewRows}</table>
+                ${more}
+            </div>`;
+        }
+
+        return `<span style="color:#0f766e;font-size:12px;line-height:1.5;">Completed successfully.</span>`;
+    };
+
     return results
         .map((r) => {
             const isSkipped = r.status === 'skipped';
@@ -348,7 +407,7 @@ function nodeResultRows(
                 ? `<span style="color:#64748b;font-size:12px;font-style:italic;">Not executed — step was skipped</span>`
                 : r.error
                     ? `<span style="color:#b91c1c;font-size:12px;line-height:1.5;word-break:break-word;">${escHtml(r.error)}</span>`
-                    : `<span style="color:#94a3b8;font-size:12px;">—</span>`;
+                    : successDetailsCell(r.output);
             const timeCell = isSkipped
                 ? `<span style="color:#94a3b8;font-size:12px;">—</span>`
                 : `<span style="color:#64748b;font-size:12px;">${formatDuration(r.durationMs)}</span>`;
@@ -434,14 +493,30 @@ function buildEmailHtml(p: ExecutionNotificationPayload, recipientTimeZone: stri
       </div>
 
       <div style="margin:0 0 18px;padding:12px 14px;border-radius:10px;background:${statusBackground};border:1px solid ${statusBorder};">
-        <div style="font-size:14px;font-weight:700;color:${statusColor};margin:0 0 4px;display:flex;align-items:center;gap:8px;">
-          <span style="font-size:16px;line-height:1;">${statusBannerIcon(p.status)}</span>
+        <div style="font-size:14px;font-weight:700;color:${statusColor};margin:0 0 4px;">
           <span>${escHtml(statusHeading(p.status))}</span>
         </div>
         <div style="font-size:13px;color:${statusColor};line-height:1.5;">${escHtml(statusMessage)}</div>
       </div>
 
-      <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;border-collapse:separate;border-spacing:0;">
+      <div style="margin-top:20px;font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.4px;">
+        Reference IDs
+      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;border-collapse:separate;border-spacing:0;">
+        <tr>
+          <td style="padding:10px 12px;background:#f9fafb;font-size:12px;font-weight:600;color:#374151;width:34%;border-bottom:1px solid #e5e7eb;">${iconLabel(fieldIcon('workflowId'), 'Workflow ID')}</td>
+          <td style="padding:10px 12px;font-size:12px;color:#6b7280;word-break:break-word;border-bottom:1px solid #e5e7eb;">${escHtml(p.workflowId)}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px;background:#f9fafb;font-size:12px;font-weight:600;color:#374151;">${iconLabel(fieldIcon('executionId'), 'Execution ID')}</td>
+          <td style="padding:10px 12px;font-size:12px;color:#6b7280;word-break:break-word;">${escHtml(p.executionId)}</td>
+        </tr>
+      </table>
+
+      <div style="margin-top:20px;font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.4px;">
+        Workflow Details
+      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;border-collapse:separate;border-spacing:0;">
         ${summaryRows}
       </table>
 
@@ -462,19 +537,6 @@ function buildEmailHtml(p: ExecutionNotificationPayload, recipientTimeZone: stri
       ${skippedNodeList(p.results, p.nodeNamesById, p.nodeTypesById, p.nodeProvidersById)}
       ${notReachedSection(p.results, p.nodeNamesById, p.nodeTypesById, p.nodeProvidersById)}
 
-      <div style="margin-top:20px;font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.4px;">
-        Reference IDs
-      </div>
-      <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;border-collapse:separate;border-spacing:0;">
-        <tr>
-          <td style="padding:10px 12px;background:#f9fafb;font-size:12px;font-weight:600;color:#374151;width:34%;border-bottom:1px solid #e5e7eb;">${iconLabel(fieldIcon('workflowId'), 'Workflow ID')}</td>
-          <td style="padding:10px 12px;font-size:12px;color:#6b7280;word-break:break-word;border-bottom:1px solid #e5e7eb;">${escHtml(p.workflowId)}</td>
-        </tr>
-        <tr>
-          <td style="padding:10px 12px;background:#f9fafb;font-size:12px;font-weight:600;color:#374151;">${iconLabel(fieldIcon('executionId'), 'Execution ID')}</td>
-          <td style="padding:10px 12px;font-size:12px;color:#6b7280;word-break:break-word;">${escHtml(p.executionId)}</td>
-        </tr>
-      </table>
     `;
 
     return buildFluxMessageHtml(
@@ -510,6 +572,18 @@ function buildEmailText(p: ExecutionNotificationPayload, recipientTimeZone: stri
         `Nodes — Failed: ${failedNodes.length}, Succeeded: ${p.results.filter(r => r.status === 'success').length}, Skipped: ${p.results.filter(r => r.status === 'skipped').length}, Total: ${p.results.length}`,
         '',
     ];
+
+    const shortTextOutput = (value: unknown, max = 180): string => {
+        if (value === null || value === undefined) return 'no output';
+        if (typeof value === 'string') return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+        if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+        try {
+            const raw = JSON.stringify(value);
+            return raw.length > max ? `${raw.slice(0, max - 1)}…` : raw;
+        } catch {
+            return 'complex output';
+        }
+    };
 
     if (failedNodes.length > 0) {
         lines.push('FAILED NODES');
@@ -554,7 +628,10 @@ function buildEmailText(p: ExecutionNotificationPayload, recipientTimeZone: stri
         const type = nodeTypeFor(r.nodeId, p.nodeTypesById);
         const provider = type === 'llm' ? (p.nodeProvidersById?.[r.nodeId] ?? 'openai') : '';
         const typeText = type === 'llm' ? `${type}:${provider}` : type;
-        lines.push(`  ${label} [${typeText}] — ${r.status.toUpperCase()} — ${formatDuration(r.durationMs)}${r.error ? ` — ${r.error}` : ''}`);
+        const outputPart = r.status === 'success'
+            ? ` — Output: ${shortTextOutput(r.output)}`
+            : '';
+        lines.push(`  ${label} [${typeText}] — ${r.status.toUpperCase()} — ${formatDuration(r.durationMs)}${r.error ? ` — ${r.error}` : ''}${outputPart}`);
     }
 
     return lines.join('\n');
