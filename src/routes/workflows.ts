@@ -129,8 +129,30 @@ export async function workflowRoutes(
         },
         async (request, reply) => {
             const body = TriggerWorkflowSchema.parse(request.body);
+
+            // When a user clicks "Run Workflow" on an app_event trigger (e.g. new
+            // spreadsheet row, Drive change) no input payload is sent from the UI.
+            // In that case we fetch the most recent live sample from the source —
+            // the same data the polling service would have provided — so that all
+            // downstream nodes receive real field values to work with.
+            let resolvedInput: Record<string, unknown> = body.input ?? {};
+            if (Object.keys(resolvedInput).length === 0 && triggerTestService) {
+                const wf = await workflowRepo.findById(body.workflowId);
+                const triggerNode = wf?.nodes.find(n => n.type === 'trigger');
+                const cfg = (triggerNode?.config ?? {}) as Record<string, unknown>;
+                if (cfg.triggerType === 'app_event' && cfg.appType) {
+                    resolvedInput = await triggerTestService
+                        .fetchLatestSample(cfg as any)
+                        .catch(() => ({}));
+                }
+            }
+
             try {
-                const summary = await workflowService.trigger(body.workflowId, body.input);
+                const summary = await workflowService.trigger(
+                    body.workflowId,
+                    resolvedInput,
+                    'manual',
+                );
                 return reply.code(200).send(summary);
             } catch {
                 throw NotFoundError(`Workflow ${body.workflowId}`);
