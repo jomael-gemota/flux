@@ -41,6 +41,26 @@ interface PollableNode {
 export class PollingService {
     private intervals: Map<string, ReturnType<typeof setInterval>> = new Map();
 
+    /**
+     * Per-node poll mutex.
+     *
+     * Multiple poll requests for the same (workflowId, nodeId) can arrive
+     * concurrently — most commonly when an external service (e.g. Google
+     * Drive) sends several push notifications for what is logically one
+     * change, but also when a push arrives while the periodic fallback poll
+     * is still running. Without serialisation each concurrent caller would:
+     *   1) read the same `lastSeenId` from TriggerStateModel,
+     *   2) compute the same "new" item(s),
+     *   3) call `workflowService.trigger(...)`,
+     * producing N duplicate executions for one logical event (visible to
+     * the user as N identical success/failure emails for a single new row).
+     *
+     * Chaining polls via this map guarantees the next caller observes the
+     * advanced cursor written by the previous one and exits cleanly with
+     * `items: []`.
+     */
+    private readonly pollLocks: Map<string, Promise<void>> = new Map();
+
     constructor(
         private workflowRepo: WorkflowRepository,
         private workflowService: WorkflowService,
@@ -134,7 +154,27 @@ export class PollingService {
             nodeId,
             config: node.config as unknown as TriggerNodeConfig,
         };
-        await this.poll(pn);
+        await this.serializedPoll(pn);
+    }
+
+    /**
+     * Wraps `poll()` in a per-(workflowId, nodeId) Promise chain so concurrent
+     * callers run sequentially. See `pollLocks` doc-comment for the full
+     * rationale (deduplicates multi-push-notification races).
+     */
+    private serializedPoll(pn: PollableNode): Promise<void> {
+        const key = `${pn.workflowId}::${pn.nodeId}`;
+        const previous = this.pollLocks.get(key) ?? Promise.resolve();
+        const current = previous
+            .catch(() => { /* swallow predecessor errors so the chain continues */ })
+            .then(() => this.poll(pn));
+
+        this.pollLocks.set(key, current);
+        current.finally(() => {
+            // Only clear the entry if no newer poll has chained on top of us.
+            if (this.pollLocks.get(key) === current) this.pollLocks.delete(key);
+        });
+        return current;
     }
 
     private registerPollable(pn: PollableNode): void {
@@ -151,13 +191,13 @@ export class PollingService {
                 : (pn.config.pollIntervalMinutes ?? 5) * 60_000;
 
         // Run the first poll immediately, then set up the interval
-        this.poll(pn).catch((err) =>
+        this.serializedPoll(pn).catch((err) =>
             console.error(`[PollingService] Initial poll error ${key}:`, err)
         );
 
         const interval = setInterval(async () => {
             try {
-                await this.poll(pn);
+                await this.serializedPoll(pn);
             } catch (err) {
                 console.error(`[PollingService] Poll error ${key}:`, err);
             }
