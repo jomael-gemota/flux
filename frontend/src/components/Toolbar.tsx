@@ -393,7 +393,12 @@ export function Toolbar() {
 
     <CredentialsModal open={credentialsOpen} onClose={() => setCredentialsOpen(false)} />
     <VersionHistoryModal open={versionHistoryOpen} onClose={() => setVersionHistoryOpen(false)} />
-    <NotificationSettingsModal open={notificationsOpen} onClose={() => setNotificationsOpen(false)} />
+    <NotificationSettingsModal
+      open={notificationsOpen}
+      onClose={() => setNotificationsOpen(false)}
+      workflowId={activeWorkflow?.id && !activeWorkflow.id.startsWith('__new__') ? activeWorkflow.id : undefined}
+      workflowName={activeWorkflow?.name}
+    />
 
     {/* Profile dropdown — rendered via portal so it escapes overflow:hidden parents */}
     {profileOpen && createPortal(

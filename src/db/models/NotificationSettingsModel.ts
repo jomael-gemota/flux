@@ -1,5 +1,14 @@
 import { Schema, model, Document } from 'mongoose';
 
+export interface WorkflowNotifOverride {
+    /**
+     * When true the execution notification for this specific workflow is sent
+     * to `recipients` below instead of the user's global recipient list.
+     */
+    useCustomRecipients: boolean;
+    recipients: string[];
+}
+
 export interface NotificationSettingsDocument extends Document {
     /**
      * Set to the owning user's MongoDB ObjectId string on creation (mirrors userId).
@@ -17,20 +26,27 @@ export interface NotificationSettingsDocument extends Document {
     notifyOnPartial: boolean;
     /** Notify when a workflow completes successfully (status === 'success') */
     notifyOnSuccess: boolean;
-    /** List of recipient email addresses (owner email is always included and cannot be removed) */
+    /** Global recipient list — used for any workflow that does not have a custom override. */
     recipients: string[];
+    /**
+     * Per-workflow recipient overrides.
+     * Keys are workflow IDs; values are `WorkflowNotifOverride`.
+     * Stored as a plain Mixed object so individual keys can be patched with dot-notation $set.
+     */
+    workflowOverrides: Record<string, WorkflowNotifOverride>;
     updatedAt: Date;
 }
 
 const NotificationSettingsSchema = new Schema<NotificationSettingsDocument>(
     {
-        key:             { type: String, required: true },
-        userId:          { type: String, required: true },
-        enabled:         { type: Boolean, required: true, default: false },
-        notifyOnFailure: { type: Boolean, required: true, default: true },
-        notifyOnPartial: { type: Boolean, required: true, default: true },
-        notifyOnSuccess: { type: Boolean, required: true, default: false },
-        recipients:      { type: [String], required: true, default: [] },
+        key:               { type: String, required: true },
+        userId:            { type: String, required: true },
+        enabled:           { type: Boolean, required: true, default: false },
+        notifyOnFailure:   { type: Boolean, required: true, default: true },
+        notifyOnPartial:   { type: Boolean, required: true, default: true },
+        notifyOnSuccess:   { type: Boolean, required: true, default: false },
+        recipients:        { type: [String], required: true, default: [] },
+        workflowOverrides: { type: Schema.Types.Mixed, required: true, default: {} },
     },
     { timestamps: true }
 );

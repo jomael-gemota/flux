@@ -611,10 +611,20 @@ export class EmailNotificationService {
         const settings = await this.settingsRepo.get(payload.ownerUserId);
 
         if (!settings.enabled) return;
-        if (!settings.recipients.length) return;
         if (payload.status === 'failure' && !settings.notifyOnFailure) return;
         if (payload.status === 'partial' && !settings.notifyOnPartial) return;
         if (payload.status === 'success' && !settings.notifyOnSuccess) return;
+
+        // Resolve the effective recipient list:
+        // Use the workflow-specific override when it exists and has custom recipients
+        // enabled; otherwise fall back to the user's global list.
+        const workflowOverride = (settings.workflowOverrides as Record<string, { useCustomRecipients: boolean; recipients: string[] }>)?.[payload.workflowId];
+        const recipients =
+            workflowOverride?.useCustomRecipients && workflowOverride.recipients.length > 0
+                ? workflowOverride.recipients
+                : settings.recipients;
+
+        if (!recipients.length) return;
 
         if (!isSmtpConfigured()) {
             console.warn('[EmailNotification] SMTP not configured — skipping notification for execution', payload.executionId);
@@ -631,7 +641,7 @@ export class EmailNotificationService {
             const subject = `${subjectPrefix}: ${payload.workflowName}`;
 
             const deliveries = await Promise.allSettled(
-                settings.recipients.map(async (recipient) => {
+                recipients.map(async (recipient) => {
                     const recipientTimeZone = resolveRecipientTimeZone(recipient);
                     await transporter.sendMail({
                         from,

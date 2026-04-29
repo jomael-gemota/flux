@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { NotificationSettingsRepository } from '../repositories/NotificationSettingsRepository';
 import { EmailNotificationService } from '../services/EmailNotificationService';
 import type { JwtPayload } from '../types/auth.types';
+import type { WorkflowNotifOverride } from '../db/models/NotificationSettingsModel';
 
 interface NotificationRouteOptions {
     notificationSettingsRepo: NotificationSettingsRepository;
@@ -12,8 +13,8 @@ async function requireAuth(req: any, reply: any) {
     await req.jwtVerify();
 }
 
-function settingsResponse(settings: any, ownerEmail: string) {
-    return {
+function settingsResponse(settings: any, ownerEmail: string, workflowId?: string) {
+    const base = {
         enabled:         settings.enabled,
         notifyOnFailure: settings.notifyOnFailure,
         notifyOnPartial: settings.notifyOnPartial,
@@ -22,6 +23,15 @@ function settingsResponse(settings: any, ownerEmail: string) {
         ownerEmail,
         smtpConfigured:  EmailNotificationService.isConfigured(),
     };
+
+    if (!workflowId) return base;
+
+    const override: WorkflowNotifOverride = (settings.workflowOverrides as Record<string, WorkflowNotifOverride>)?.[workflowId] ?? {
+        useCustomRecipients: false,
+        recipients: [],
+    };
+
+    return { ...base, workflowOverride: override };
 }
 
 export async function notificationRoutes(
@@ -30,15 +40,22 @@ export async function notificationRoutes(
 ) {
     const { notificationSettingsRepo, emailNotificationService } = opts;
 
-    /** GET /api/notifications/settings — fetch current notification settings */
-    fastify.get(
+    /**
+     * GET /api/notifications/settings
+     * Optional query param: ?workflowId=<id>
+     * When workflowId is supplied the response includes a `workflowOverride` field
+     * containing the per-workflow recipient override for that workflow.
+     */
+    fastify.get<{ Querystring: { workflowId?: string } }>(
         '/notifications/settings',
         { preHandler: [requireAuth] },
         async (req) => {
             const user = (req as any).user as JwtPayload;
+            const { workflowId } = req.query;
+
             const settings = await notificationSettingsRepo.get(user.sub);
 
-            // Ensure the owner is in the recipients list on first load
+            // Ensure the owner is in the global recipients list on first load
             if (user.email && !settings.recipients.includes(user.email.toLowerCase())) {
                 await notificationSettingsRepo.update(
                     { recipients: [user.email.toLowerCase(), ...settings.recipients] },
@@ -47,11 +64,11 @@ export async function notificationRoutes(
                 settings.recipients = [user.email.toLowerCase(), ...settings.recipients];
             }
 
-            return settingsResponse(settings, user.email);
+            return settingsResponse(settings, user.email, workflowId);
         },
     );
 
-    /** PATCH /api/notifications/settings — update notification settings */
+    /** PATCH /api/notifications/settings — update global notification settings */
     fastify.patch<{
         Body: {
             enabled?:         boolean;
@@ -78,15 +95,43 @@ export async function notificationRoutes(
                 const cleaned = recipients
                     .map((e) => e.trim().toLowerCase())
                     .filter((e) => e.includes('@'));
-                // Prepend owner email if missing
-                if (!cleaned.includes(ownerEmail)) {
-                    cleaned.unshift(ownerEmail);
-                }
+                if (!cleaned.includes(ownerEmail)) cleaned.unshift(ownerEmail);
                 patch.recipients = cleaned;
             }
 
             const updated = await notificationSettingsRepo.update(patch as any, user.sub);
             return settingsResponse(updated, user.email);
+        },
+    );
+
+    /**
+     * PATCH /api/notifications/workflows/:workflowId/recipients
+     * Save (or clear) the per-workflow recipient override for a single workflow.
+     * Body: { useCustomRecipients: boolean; recipients: string[] }
+     */
+    fastify.patch<{
+        Params: { workflowId: string };
+        Body:   { useCustomRecipients: boolean; recipients: string[] };
+    }>(
+        '/notifications/workflows/:workflowId/recipients',
+        { preHandler: [requireAuth] },
+        async (req) => {
+            const user = (req as any).user as JwtPayload;
+            const { workflowId } = req.params;
+            const { useCustomRecipients, recipients } = req.body;
+
+            // Clean recipients — always keep the owner email present when using custom list
+            const ownerEmail = user.email.trim().toLowerCase();
+            const cleaned = (recipients ?? [])
+                .map((e: string) => e.trim().toLowerCase())
+                .filter((e: string) => e.includes('@'));
+            if (useCustomRecipients && !cleaned.includes(ownerEmail)) {
+                cleaned.unshift(ownerEmail);
+            }
+
+            const override: WorkflowNotifOverride = { useCustomRecipients, recipients: cleaned };
+            const updated = await notificationSettingsRepo.setWorkflowOverride(user.sub, workflowId, override);
+            return settingsResponse(updated, user.email, workflowId);
         },
     );
 

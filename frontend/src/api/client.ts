@@ -483,26 +483,53 @@ export function listBasecampPeople(credentialId: string, projectId?: string) {
 
 // ── Email Notifications ────────────────────────────────────────────────────
 
+/** Per-workflow recipient override stored inside a user's notification settings. */
+export interface WorkflowNotifOverride {
+  /** When true, `recipients` below is used instead of the global recipient list. */
+  useCustomRecipients: boolean;
+  recipients: string[];
+}
+
 export interface NotificationSettings {
   enabled: boolean;
   notifyOnFailure: boolean;
   notifyOnPartial: boolean;
   notifyOnSuccess: boolean;
+  /** Global default recipients — used for workflows without a custom override. */
   recipients: string[];
-  /** Email of the authenticated user — always present in recipients and cannot be removed */
+  /** Email of the authenticated user — always present in recipients and cannot be removed. */
   ownerEmail: string;
   smtpConfigured: boolean;
+  /** Only present when the request was made with a ?workflowId query param. */
+  workflowOverride?: WorkflowNotifOverride;
 }
 
+/** Fetch global settings. */
 export function getNotificationSettings() {
   return request<NotificationSettings>('/notifications/settings');
 }
 
-export function updateNotificationSettings(patch: Partial<Omit<NotificationSettings, 'smtpConfigured' | 'ownerEmail'>>) {
+/** Fetch global settings AND the per-workflow override for a specific workflow. */
+export function getNotificationSettingsForWorkflow(workflowId: string) {
+  return request<NotificationSettings>(`/notifications/settings?workflowId=${encodeURIComponent(workflowId)}`);
+}
+
+export function updateNotificationSettings(patch: Partial<Omit<NotificationSettings, 'smtpConfigured' | 'ownerEmail' | 'workflowOverride'>>) {
   return request<NotificationSettings>('/notifications/settings', {
     method: 'PATCH',
     body: JSON.stringify(patch),
   });
+}
+
+/** Save or clear the per-workflow recipient override. */
+export function updateWorkflowNotifRecipients(
+  workflowId: string,
+  override: WorkflowNotifOverride,
+) {
+  return request<NotificationSettings>(
+    `/notifications/workflows/${encodeURIComponent(workflowId)}/recipients`,
+    { method: 'PATCH', body: JSON.stringify(override) },
+  );
 }
 
 export function sendTestEmail(email: string) {

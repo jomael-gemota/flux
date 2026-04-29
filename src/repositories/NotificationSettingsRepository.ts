@@ -1,4 +1,6 @@
-import { NotificationSettingsModel, type NotificationSettingsDocument } from '../db/models/NotificationSettingsModel';
+import { NotificationSettingsModel, type NotificationSettingsDocument, type WorkflowNotifOverride } from '../db/models/NotificationSettingsModel';
+
+export type { WorkflowNotifOverride };
 
 export class NotificationSettingsRepository {
     /**
@@ -28,6 +30,26 @@ export class NotificationSettingsRepository {
         const doc = await NotificationSettingsModel.findOneAndUpdate(
             { userId },
             { $set: patch, $setOnInsert: { key: userId } },
+            { new: true, upsert: true },
+        );
+        return doc!;
+    }
+
+    /**
+     * Upsert the per-workflow recipient override for a single workflow.
+     * Uses MongoDB dot-notation so only the targeted key in the Mixed object is
+     * touched — all other workflow overrides remain unchanged.
+     */
+    async setWorkflowOverride(
+        userId: string,
+        workflowId: string,
+        override: WorkflowNotifOverride,
+    ): Promise<NotificationSettingsDocument> {
+        const doc = await NotificationSettingsModel.findOneAndUpdate(
+            { userId },
+            {
+                $set: { [`workflowOverrides.${workflowId}`]: override, key: userId },
+            },
             { new: true, upsert: true },
         );
         return doc!;
