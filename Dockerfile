@@ -1,4 +1,4 @@
-FROM node:20-alpine AS builder
+FROM public.ecr.aws/docker/library/node:20-alpine AS builder
 WORKDIR /app
 
 # Install and build backend
@@ -17,7 +17,7 @@ RUN cd frontend && npm run build
 # Place frontend build where the backend will serve it from
 RUN cp -r frontend/dist dist/public
 
-FROM node:20-alpine AS runtime
+FROM public.ecr.aws/docker/library/node:20-alpine AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production
