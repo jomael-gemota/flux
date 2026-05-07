@@ -7,6 +7,8 @@ export type NodeType =
   | 'transform'
   | 'extract'
   | 'output'
+  | 'code'
+  | 'loop'
   | 'gmail'
   | 'gdrive'
   | 'gdocs'

@@ -67,6 +67,8 @@ import { TransformNode } from './nodes/TransformNode';
 import { ExtractNode } from './nodes/ExtractNode';
 import { OutputNode } from './nodes/OutputNode';
 import { MessageFormatterNode } from './nodes/MessageFormatterNode';
+import { CodeNode } from './nodes/CodeNode';
+import { LoopNode } from './nodes/LoopNode';
 import { runSeeds } from './db/seeds';
 
 import { ApiKeyModel } from './db/models/ApiKeyModel';
@@ -93,6 +95,8 @@ async function bootstrap() {
     registry.register('extract', new ExtractNode());
     registry.register('output', new OutputNode());
     registry.register('formatter', new MessageFormatterNode());
+    registry.register('code', new CodeNode());
+    registry.register('loop', new LoopNode());
     const runner = new WorkflowRunner(registry);
 
     // 2a. User auth service

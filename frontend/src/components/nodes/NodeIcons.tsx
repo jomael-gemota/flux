@@ -1,7 +1,7 @@
 /**
  * Shared node icon components used in the palette, canvas node headers, etc.
  */
-import { Globe, Sparkles, GitBranch, Shuffle, Wand2, Flag, Zap, PenLine, ScanText } from 'lucide-react';
+import { Globe, Sparkles, GitBranch, Shuffle, Wand2, Flag, Zap, PenLine, ScanText, Code2, Repeat } from 'lucide-react';
 import type { NodeType } from '../../types/workflow';
 
 // ── Logo image helper ─────────────────────────────────────────────────────────
@@ -137,6 +137,8 @@ export function NodeIcon({ type, size = 13 }: { type: NodeType | string; size?: 
     case 'extract':   return <ScanText    size={size} className={LUCIDE_CLS} />;
     case 'output':    return <Flag        size={size} className={LUCIDE_CLS} />;
     case 'formatter': return <PenLine     size={size} className={LUCIDE_CLS} />;
+    case 'code':      return <Code2       size={size} className={LUCIDE_CLS} />;
+    case 'loop':      return <Repeat      size={size} className={LUCIDE_CLS} />;
     case 'gmail':     return <GmailIcon   size={size} />;
     case 'gdrive':    return <GDriveIcon  size={size} />;
     case 'gdocs':     return <GDocsIcon   size={size} />;

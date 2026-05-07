@@ -3697,6 +3697,12 @@ export function NodeConfigPanel() {
       {nodeType === 'output' && (
         <OutputConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
       )}
+      {nodeType === 'code' && (
+        <CodeConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
+      )}
+      {nodeType === 'loop' && (
+        <LoopConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
+      )}
       {nodeType === 'formatter' && (
         <MessageFormatterConfig cfg={cfg} onChange={updateConfig} otherNodes={otherNodes} testResults={testResults} />
       )}
@@ -4593,6 +4599,218 @@ function OutputConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
       testResults={testResults}
       hint="This value becomes the final result of the workflow execution."
     />
+  );
+}
+
+// ── Code ──────────────────────────────────────────────────────────────────────
+//
+// Runs arbitrary JavaScript with full Node.js access. Available identifiers
+// inside the user code:
+//   • nodes      — every prior node's output, keyed by node id
+//   • input      — the workflow's input payload
+//   • console    — log/info/warn/error captured into output.logs
+//   • workflow   — { id }
+//   • execution  — { id, startedAt }
+//
+// The user code is wrapped in an `async` IIFE, so `await` works directly.
+// The value `return`-ed becomes the node output's `result` field.
+
+function CodeConfig({ cfg, onChange }: ConfigProps) {
+  const code = String(cfg.code ?? '');
+  return (
+    <>
+      <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-semibold">
+        JavaScript
+      </p>
+      <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-snug">
+        Available: <code className="font-mono text-slate-600 dark:text-slate-300">nodes</code>,{' '}
+        <code className="font-mono text-slate-600 dark:text-slate-300">input</code>,{' '}
+        <code className="font-mono text-slate-600 dark:text-slate-300">console</code>,{' '}
+        <code className="font-mono text-slate-600 dark:text-slate-300">workflow</code>,{' '}
+        <code className="font-mono text-slate-600 dark:text-slate-300">execution</code>. Use{' '}
+        <code className="font-mono text-slate-600 dark:text-slate-300">return</code> to set the
+        node's output. <code className="font-mono">await</code> is supported.
+      </p>
+      <textarea
+        rows={14}
+        value={code}
+        placeholder={`// Example: return only Gmail threads where the bot has not yet replied\nconst threads = nodes['gmail-list'].threads;\nconst botEmail = 'flux-workflow@outdoorequippedservice.com';\n\nreturn threads.filter(t =>\n  !t.messages.some(m => m.from.includes(botEmail))\n);`}
+        onChange={(e) => onChange({ code: e.target.value })}
+        spellCheck={false}
+        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-mono leading-relaxed resize-y"
+        style={{ minHeight: 220 }}
+      />
+      <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-snug">
+        Output shape: <code className="font-mono text-slate-600 dark:text-slate-300">{'{ result, logs }'}</code>.
+        Reference downstream as{' '}
+        <code className="font-mono text-slate-600 dark:text-slate-300">{'{{nodes.<id>.result}}'}</code>.
+      </p>
+    </>
+  );
+}
+
+// ── Loop ──────────────────────────────────────────────────────────────────────
+//
+// Self-contained loop. Modes:
+//   • forEach — iterate an array (path expression in `items`)
+//   • times   — run N iterations (literal or path expression in `count`)
+//   • while   — run while a JS expression is truthy (`condition`)
+//   • batch   — split an array into chunks of `batchSize`
+//
+// The body is JavaScript. `item`, `index`, `acc`, `nodes`, `input` are
+// available; the value returned from the body becomes that iteration's
+// result and the next iteration's `acc`.
+
+const LOOP_MODE_OPTIONS = [
+  { value: 'forEach', label: 'forEach — iterate an array' },
+  { value: 'times',   label: 'times — run N iterations' },
+  { value: 'while',   label: 'while — repeat while condition is true' },
+  { value: 'batch',   label: 'batch — process array in chunks' },
+];
+
+function LoopConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
+  const mode = (cfg.mode as string) ?? 'forEach';
+  const body = String(cfg.body ?? '');
+  const initialAcc = String(cfg.initialAcc ?? '');
+  const maxIterations = Number(cfg.maxIterations ?? 1000);
+
+  return (
+    <>
+      <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-semibold">
+        Mode
+      </p>
+      <select
+        value={mode}
+        onChange={(e) => onChange({ mode: e.target.value })}
+        className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+      >
+        {LOOP_MODE_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
+
+      {(mode === 'forEach' || mode === 'batch') && (
+        <ExpressionInput
+          label="Items (must resolve to an array)"
+          value={String(cfg.items ?? '')}
+          onChange={(v) => onChange({ items: v })}
+          placeholder="{{nodes.gmail-list.threads[0].messages}}"
+          nodes={otherNodes}
+          testResults={testResults}
+        />
+      )}
+
+      {mode === 'batch' && (
+        <div className="space-y-1">
+          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+            Batch size
+          </label>
+          <input
+            type="number"
+            min={1}
+            value={Number(cfg.batchSize ?? 10)}
+            onChange={(e) => onChange({ batchSize: Number(e.target.value) || 1 })}
+            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+          />
+        </div>
+      )}
+
+      {mode === 'times' && (
+        <ExpressionInput
+          label="Iteration count"
+          value={String(cfg.count ?? '')}
+          onChange={(v) => onChange({ count: v })}
+          placeholder="10  or  {{nodes.x.someCount}}"
+          nodes={otherNodes}
+          testResults={testResults}
+        />
+      )}
+
+      {mode === 'while' && (
+        <div className="space-y-1">
+          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+            Condition (JavaScript)
+          </label>
+          <input
+            type="text"
+            value={String(cfg.condition ?? '')}
+            onChange={(e) => onChange({ condition: e.target.value })}
+            placeholder="index < 10 && acc !== 'done'"
+            spellCheck={false}
+            className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-mono"
+          />
+          <p className="text-[10px] text-slate-400 dark:text-slate-500">
+            Available: <code className="font-mono">index</code>, <code className="font-mono">acc</code>,{' '}
+            <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+          Body (JavaScript)
+        </label>
+        <textarea
+          rows={8}
+          value={body}
+          onChange={(e) => onChange({ body: e.target.value })}
+          placeholder={
+            mode === 'forEach' ? 'return { id: item.id, upper: item.subject?.toUpperCase() };' :
+            mode === 'times'   ? 'return `Iteration ${index}`;' :
+            mode === 'while'   ? 'return (acc ?? 0) + 1;' :
+                                 'return item.length; // item is the current batch (array)'
+          }
+          spellCheck={false}
+          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-mono leading-relaxed resize-y"
+          style={{ minHeight: 130 }}
+        />
+        <p className="text-[10px] text-slate-400 dark:text-slate-500">
+          {mode === 'forEach' && (<>Available: <code className="font-mono">item</code>, <code className="font-mono">index</code>, <code className="font-mono">acc</code>, <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.</>)}
+          {mode === 'times'   && (<>Available: <code className="font-mono">index</code>, <code className="font-mono">acc</code>, <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.</>)}
+          {mode === 'while'   && (<>Available: <code className="font-mono">index</code>, <code className="font-mono">acc</code>, <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.</>)}
+          {mode === 'batch'   && (<>Available: <code className="font-mono">item</code> (the chunk array), <code className="font-mono">index</code>, <code className="font-mono">acc</code>, <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.</>)}
+          {' '}<code className="font-mono">return</code> the iteration result. <code className="font-mono">await</code> is supported.
+        </p>
+      </div>
+
+      <details className="text-xs">
+        <summary className="cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 select-none">
+          Advanced
+        </summary>
+        <div className="mt-2 space-y-2 pl-2 border-l border-slate-200 dark:border-slate-700">
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+              Initial accumulator (JS expression)
+            </label>
+            <input
+              type="text"
+              value={initialAcc}
+              onChange={(e) => onChange({ initialAcc: e.target.value })}
+              placeholder="0  or  []  or  { count: 0 }"
+              spellCheck={false}
+              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-mono"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+              Max iterations (safety cap)
+            </label>
+            <input
+              type="number"
+              min={1}
+              value={maxIterations}
+              onChange={(e) => onChange({ maxIterations: Number(e.target.value) || 1 })}
+              className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+        </div>
+      </details>
+
+      <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-snug">
+        Output: <code className="font-mono text-slate-600 dark:text-slate-300">{'{ mode, iterations, results, acc, ... }'}</code>.
+        Use <code className="font-mono">{'{{nodes.<id>.results}}'}</code> downstream.
+      </p>
+    </>
   );
 }
 

@@ -34,6 +34,8 @@ import { SwitchNodeWidget } from '../nodes/SwitchNodeWidget';
 import { TransformNodeWidget } from '../nodes/TransformNodeWidget';
 import { ExtractNodeWidget } from '../nodes/ExtractNodeWidget';
 import { OutputNodeWidget } from '../nodes/OutputNodeWidget';
+import { CodeNodeWidget } from '../nodes/CodeNodeWidget';
+import { LoopNodeWidget } from '../nodes/LoopNodeWidget';
 import { GmailNodeWidget } from '../nodes/GmailNodeWidget';
 import { GDriveNodeWidget } from '../nodes/GDriveNodeWidget';
 import { GDocsNodeWidget } from '../nodes/GDocsNodeWidget';
@@ -68,6 +70,8 @@ function WorkflowNodeRenderer(props: NodeProps) {
     case 'transform': return <TransformNodeWidget {...p} />;
     case 'extract':   return <ExtractNodeWidget   {...p} />;
     case 'output': return <OutputNodeWidget {...p} />;
+    case 'code':   return <CodeNodeWidget   {...p} />;
+    case 'loop':   return <LoopNodeWidget   {...p} />;
     case 'gmail':   return <GmailNodeWidget   {...p} />;
     case 'gdrive':  return <GDriveNodeWidget  {...p} />;
     case 'gdocs':   return <GDocsNodeWidget   {...p} />;
@@ -95,6 +99,8 @@ const DEFAULT_CONFIGS: Partial<Record<NodeType, Record<string, unknown>>> = {
   transform: { mappings: {} },
   extract: { source: '', preprocess: 'plain-text', fields: [], mode: 'auto', textPath: '', aiProvider: 'openai', aiModel: 'gpt-5.4-mini', aiTemperature: 0 },
   output: { value: '' },
+  code: { code: '// Available: nodes, input, console, workflow, execution\n// Last expression or `return` value becomes this node\'s output.\n\nreturn { hello: "world" };' },
+  loop: { mode: 'forEach', items: '', body: 'return item;', count: 0, condition: 'index < 10', batchSize: 10, maxIterations: 1000 },
   gmail:   { action: 'send',   credentialId: '', to: '', subject: '', body: '' },
   gdrive:  { action: 'list',   credentialId: '', query: '' },
   gdocs:   { action: 'read',   credentialId: '', documentId: '' },

@@ -45,6 +45,7 @@ const CATEGORIES: PaletteCategory[] = [
     nodes: [
       { type: 'condition', label: 'Condition', description: 'If / else branch' },
       { type: 'switch',    label: 'Switch',    description: 'Multi-path routing' },
+      { type: 'loop',      label: 'Loop',      description: 'forEach, times, while, batch' },
     ],
   },
   {
@@ -53,6 +54,7 @@ const CATEGORIES: PaletteCategory[] = [
     nodes: [
       { type: 'transform', label: 'Transform',         description: 'Map & reshape values' },
       { type: 'extract',   label: 'Extract',           description: 'Pull named fields out of email bodies & messy text' },
+      { type: 'code',      label: 'Code',              description: 'Run custom JavaScript with full Node.js access' },
       { type: 'formatter', label: 'Message Formatter', description: 'Beautify data for Slack, Teams, Gmail or Docs' },
       { type: 'output',    label: 'Output',            description: 'Final workflow result' },
     ],
