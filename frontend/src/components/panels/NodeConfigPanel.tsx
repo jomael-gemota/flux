@@ -789,6 +789,146 @@ function insertAtCursor(
   });
 }
 
+// ── Template → JS accessor conversion ─────────────────────────────────────────
+//
+// VariablePickerPanel inserts template-style expressions like
+// `{{nodes.<id>.field[0].sub}}`. Inside Code and Loop nodes the user is
+// writing real JavaScript, so we convert each token into a JS member-access
+// expression. Node ids commonly contain hyphens (`node-94hamxb6`) so the
+// node id is always wrapped in bracket notation; subsequent path segments
+// use dot notation when they're valid identifiers, brackets otherwise.
+
+const JS_IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+function templateToJsAccess(template: string): string {
+  return template.replace(/\{\{\s*nodes\.([^}]+?)\s*\}\}/g, (_, rest: string) => {
+    const dotParts = rest.split('.');
+    const id = dotParts[0];
+    let result = `nodes['${id}']`;
+    for (let i = 1; i < dotParts.length; i++) {
+      const part = dotParts[i];
+      const m = part.match(/^([^\[]+)(\[.*\])?$/);
+      if (!m) {
+        result += JS_IDENT_RE.test(part) ? `.${part}` : `['${part}']`;
+        continue;
+      }
+      const propName = m[1];
+      const brackets = m[2] ?? '';
+      result += JS_IDENT_RE.test(propName)
+        ? `.${propName}${brackets}`
+        : `['${propName}']${brackets}`;
+    }
+    return result;
+  });
+}
+
+// ── JsCodeArea ────────────────────────────────────────────────────────────────
+//
+// Plain textarea (single- or multi-line) sized for code, with an "Insert variable"
+// button that opens VariablePickerPanel and converts each picked token to a JS
+// member-access expression. Used by Code and Loop nodes where the user is
+// writing real JavaScript (no `{{...}}` templating).
+
+function JsCodeArea({
+  label,
+  value,
+  rows = 12,
+  placeholder,
+  onChange,
+  nodes,
+  testResults,
+  hint,
+  singleLine = false,
+}: {
+  label?: string;
+  value: string;
+  rows?: number;
+  placeholder?: string;
+  onChange: (v: string) => void;
+  nodes: CanvasNode[];
+  testResults: Record<string, NodeTestResult>;
+  hint?: ReactNode;
+  /** Render as a single-line input instead of a textarea. */
+  singleLine?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const taRef    = useRef<HTMLTextAreaElement>(null);
+
+  function handleInsert(template: string) {
+    const jsExpr = templateToJsAccess(template);
+    const el = singleLine ? inputRef.current : taRef.current;
+    if (el) insertAtCursor(el, jsExpr, value, onChange);
+    else onChange(value + jsExpr);
+    setOpen(false);
+  }
+
+  return (
+    <div className="space-y-1">
+      {(label || nodes.length > 0) && (
+        <div className="flex items-center justify-between gap-1">
+          {label && (
+            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+              {label}
+            </label>
+          )}
+          {nodes.length > 0 && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setOpen((p) => !p)}
+              title="Insert a variable from another node (converted to JS access)"
+              className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded transition-colors shrink-0 ml-auto ${
+                open
+                  ? 'bg-blue-600 text-white'
+                  : 'text-blue-500 dark:text-blue-400 hover:text-gray-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700'
+              }`}
+            >
+              <Braces className="w-2.5 h-2.5" />
+              Insert variable
+            </button>
+          )}
+        </div>
+      )}
+
+      {singleLine ? (
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          spellCheck={false}
+          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-mono"
+        />
+      ) : (
+        <textarea
+          ref={taRef}
+          rows={rows}
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          spellCheck={false}
+          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-mono leading-relaxed resize-y"
+          style={{ minHeight: rows * 18 + 16 }}
+        />
+      )}
+
+      {hint && (
+        <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-snug">{hint}</p>
+      )}
+
+      {open && (
+        <VariablePickerPanel
+          nodes={nodes}
+          testResults={testResults}
+          onInsert={handleInsert}
+        />
+      )}
+    </div>
+  );
+}
+
 // ── ExpressionTextArea ────────────────────────────────────────────────────────
 
 function ExpressionTextArea({
@@ -4615,7 +4755,7 @@ function OutputConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
 // The user code is wrapped in an `async` IIFE, so `await` works directly.
 // The value `return`-ed becomes the node output's `result` field.
 
-function CodeConfig({ cfg, onChange }: ConfigProps) {
+function CodeConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
   const code = String(cfg.code ?? '');
   return (
     <>
@@ -4631,20 +4771,21 @@ function CodeConfig({ cfg, onChange }: ConfigProps) {
         <code className="font-mono text-slate-600 dark:text-slate-300">return</code> to set the
         node's output. <code className="font-mono">await</code> is supported.
       </p>
-      <textarea
-        rows={14}
+      <JsCodeArea
         value={code}
-        placeholder={`// Example: return only Gmail threads where the bot has not yet replied\nconst threads = nodes['gmail-list'].threads;\nconst botEmail = 'flux-workflow@outdoorequippedservice.com';\n\nreturn threads.filter(t =>\n  !t.messages.some(m => m.from.includes(botEmail))\n);`}
-        onChange={(e) => onChange({ code: e.target.value })}
-        spellCheck={false}
-        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-mono leading-relaxed resize-y"
-        style={{ minHeight: 220 }}
+        rows={14}
+        onChange={(v) => onChange({ code: v })}
+        nodes={otherNodes}
+        testResults={testResults}
+        placeholder={`// Example: return only Gmail threads where the bot has not yet replied\nconst threads = nodes['<gmail-list-id>'].threads;\nconst botEmail = 'flux-workflow@outdoorequippedservice.com';\n\nreturn threads.filter(t =>\n  !t.messages.some(m => m.from.includes(botEmail))\n);`}
+        hint={
+          <>
+            Output: <code className="font-mono text-slate-600 dark:text-slate-300">{'{ result, logs }'}</code>.
+            Reference downstream as{' '}
+            <code className="font-mono text-slate-600 dark:text-slate-300">{'{{nodes.<id>.result}}'}</code>.
+          </>
+        }
       />
-      <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-snug">
-        Output shape: <code className="font-mono text-slate-600 dark:text-slate-300">{'{ result, logs }'}</code>.
-        Reference downstream as{' '}
-        <code className="font-mono text-slate-600 dark:text-slate-300">{'{{nodes.<id>.result}}'}</code>.
-      </p>
     </>
   );
 }
@@ -4727,70 +4868,61 @@ function LoopConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
       )}
 
       {mode === 'while' && (
-        <div className="space-y-1">
-          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
-            Condition (JavaScript)
-          </label>
-          <input
-            type="text"
-            value={String(cfg.condition ?? '')}
-            onChange={(e) => onChange({ condition: e.target.value })}
-            placeholder="index < 10 && acc !== 'done'"
-            spellCheck={false}
-            className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-mono"
-          />
-          <p className="text-[10px] text-slate-400 dark:text-slate-500">
-            Available: <code className="font-mono">index</code>, <code className="font-mono">acc</code>,{' '}
-            <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.
-          </p>
-        </div>
+        <JsCodeArea
+          label="Condition (JavaScript)"
+          value={String(cfg.condition ?? '')}
+          onChange={(v) => onChange({ condition: v })}
+          nodes={otherNodes}
+          testResults={testResults}
+          placeholder="index < 10 && acc !== 'done'"
+          singleLine
+          hint={
+            <>
+              Available: <code className="font-mono">index</code>, <code className="font-mono">acc</code>,{' '}
+              <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.
+            </>
+          }
+        />
       )}
 
-      <div className="space-y-1">
-        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
-          Body (JavaScript)
-        </label>
-        <textarea
-          rows={8}
-          value={body}
-          onChange={(e) => onChange({ body: e.target.value })}
-          placeholder={
-            mode === 'forEach' ? 'return { id: item.id, upper: item.subject?.toUpperCase() };' :
-            mode === 'times'   ? 'return `Iteration ${index}`;' :
-            mode === 'while'   ? 'return (acc ?? 0) + 1;' :
-                                 'return item.length; // item is the current batch (array)'
-          }
-          spellCheck={false}
-          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-mono leading-relaxed resize-y"
-          style={{ minHeight: 130 }}
-        />
-        <p className="text-[10px] text-slate-400 dark:text-slate-500">
-          {mode === 'forEach' && (<>Available: <code className="font-mono">item</code>, <code className="font-mono">index</code>, <code className="font-mono">acc</code>, <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.</>)}
-          {mode === 'times'   && (<>Available: <code className="font-mono">index</code>, <code className="font-mono">acc</code>, <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.</>)}
-          {mode === 'while'   && (<>Available: <code className="font-mono">index</code>, <code className="font-mono">acc</code>, <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.</>)}
-          {mode === 'batch'   && (<>Available: <code className="font-mono">item</code> (the chunk array), <code className="font-mono">index</code>, <code className="font-mono">acc</code>, <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.</>)}
-          {' '}<code className="font-mono">return</code> the iteration result. <code className="font-mono">await</code> is supported.
-        </p>
-      </div>
+      <JsCodeArea
+        label="Body (JavaScript)"
+        value={body}
+        rows={8}
+        onChange={(v) => onChange({ body: v })}
+        nodes={otherNodes}
+        testResults={testResults}
+        placeholder={
+          mode === 'forEach' ? 'return { id: item.id, upper: item.subject?.toUpperCase() };' :
+          mode === 'times'   ? 'return `Iteration ${index}`;' :
+          mode === 'while'   ? 'return (acc ?? 0) + 1;' :
+                               'return item.length; // item is the current batch (array)'
+        }
+        hint={
+          <>
+            {mode === 'forEach' && (<>Available: <code className="font-mono">item</code>, <code className="font-mono">index</code>, <code className="font-mono">acc</code>, <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.</>)}
+            {mode === 'times'   && (<>Available: <code className="font-mono">index</code>, <code className="font-mono">acc</code>, <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.</>)}
+            {mode === 'while'   && (<>Available: <code className="font-mono">index</code>, <code className="font-mono">acc</code>, <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.</>)}
+            {mode === 'batch'   && (<>Available: <code className="font-mono">item</code> (the chunk array), <code className="font-mono">index</code>, <code className="font-mono">acc</code>, <code className="font-mono">nodes</code>, <code className="font-mono">input</code>.</>)}
+            {' '}<code className="font-mono">return</code> the iteration result. <code className="font-mono">await</code> is supported.
+          </>
+        }
+      />
 
       <details className="text-xs">
         <summary className="cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 select-none">
           Advanced
         </summary>
         <div className="mt-2 space-y-2 pl-2 border-l border-slate-200 dark:border-slate-700">
-          <div className="space-y-1">
-            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
-              Initial accumulator (JS expression)
-            </label>
-            <input
-              type="text"
-              value={initialAcc}
-              onChange={(e) => onChange({ initialAcc: e.target.value })}
-              placeholder="0  or  []  or  { count: 0 }"
-              spellCheck={false}
-              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-gray-900 dark:text-slate-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-mono"
-            />
-          </div>
+          <JsCodeArea
+            label="Initial accumulator (JS expression)"
+            value={initialAcc}
+            onChange={(v) => onChange({ initialAcc: v })}
+            nodes={otherNodes}
+            testResults={testResults}
+            placeholder="0  or  []  or  { count: 0 }"
+            singleLine
+          />
           <div className="space-y-1">
             <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
               Max iterations (safety cap)
