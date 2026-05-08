@@ -1,4 +1,4 @@
-import { CloudUpload, Zap, BellRing, GitBranch, Loader2, Check } from 'lucide-react';
+import { CloudUpload, Zap, BellRing, GitBranch, Loader2, Check, Sparkles } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useWorkflowStore } from '../../store/workflowStore';
@@ -68,6 +68,10 @@ export function CanvasActionDock() {
     setLogOpen,
     setLastExecutionId,
     beginExecution,
+    rightPanelTab,
+    setRightPanelTab,
+    configOpen,
+    setConfigOpen,
   } = useWorkflowStore();
 
   const { save, isSaving } = useSaveWorkflow();
@@ -246,6 +250,21 @@ export function CanvasActionDock() {
           disabled={!activeWorkflow || isNew}
         >
           <GitBranch className="w-[18px] h-[18px]" />
+        </DockButton>
+
+        {/* Divider */}
+        <span className="w-px h-5 bg-black/[0.07] dark:bg-white/[0.07] mx-0.5" />
+
+        {/* Fluxelle — AI workflow assistant */}
+        <DockButton
+          label="Ask Fluxelle"
+          onClick={() => {
+            if (!configOpen) setConfigOpen(true);
+            setRightPanelTab('fluxelle');
+          }}
+          active={configOpen && rightPanelTab === 'fluxelle'}
+        >
+          <Sparkles className="w-[18px] h-[18px]" />
         </DockButton>
 
       </div>

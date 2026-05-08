@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect } from 'react';
-import { ScrollText, ChevronUp, ChevronDown, Loader2 } from 'lucide-react';
+import { ScrollText, ChevronUp, ChevronDown, Loader2, Settings2, Sparkles } from 'lucide-react';
 import { Toolbar } from './Toolbar';
 import { WorkflowSidebar } from './WorkflowSidebar';
 import { CanvasActionDock } from './canvas/CanvasActionDock';
@@ -24,13 +24,14 @@ const LOG_MAX        = 500;
 // ── Layout ────────────────────────────────────────────────────────────────────
 
 interface LayoutProps {
-  canvas:       ReactNode;
-  configPanel:  ReactNode;
-  executionLog: ReactNode;
+  canvas:         ReactNode;
+  configPanel:    ReactNode;
+  fluxellePanel:  ReactNode;
+  executionLog:   ReactNode;
 }
 
-export function Layout({ canvas, configPanel, executionLog }: LayoutProps) {
-  const { logOpen, setLogOpen, configOpen, isSwitchingWorkflow } = useWorkflowStore();
+export function Layout({ canvas, configPanel, fluxellePanel, executionLog }: LayoutProps) {
+  const { logOpen, setLogOpen, configOpen, isSwitchingWorkflow, rightPanelTab, setRightPanelTab } = useWorkflowStore();
   const { start: startTour } = useTourStore();
 
   // Auto-launch the tour once for first-time users
@@ -123,7 +124,7 @@ export function Layout({ canvas, configPanel, executionLog }: LayoutProps) {
 
         </div>
 
-        {/* ── Config panel — full height, sibling of sidebar ─── */}
+        {/* ── Right panel — tabbed: Config (per-node) / Fluxelle (AI) ─── */}
         {configOpen && (
           <>
             <div
@@ -138,8 +139,33 @@ export function Layout({ canvas, configPanel, executionLog }: LayoutProps) {
               className="flex flex-col glass-surface border-l border-black/[0.07] dark:border-white/10 shrink-0 overflow-hidden"
               style={{ width: configWidth }}
             >
-              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-                {configPanel}
+              {/* Tab strip */}
+              <div className="flex items-stretch shrink-0 border-b border-black/[0.07] dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.02]">
+                <RightTabButton
+                  active={rightPanelTab === 'config'}
+                  onClick={() => setRightPanelTab('config')}
+                  icon={<Settings2 className="w-3.5 h-3.5" />}
+                  label="Config"
+                />
+                <RightTabButton
+                  active={rightPanelTab === 'fluxelle'}
+                  onClick={() => setRightPanelTab('fluxelle')}
+                  icon={<Sparkles className="w-3.5 h-3.5 text-violet-500 dark:text-violet-400" />}
+                  label="Fluxelle"
+                />
+              </div>
+
+              {/* Tab body — only the active tab is mounted to keep state lean */}
+              <div className="flex-1 min-h-0 overflow-hidden">
+                {rightPanelTab === 'config' ? (
+                  <div className="h-full overflow-y-auto overflow-x-hidden">
+                    {configPanel}
+                  </div>
+                ) : (
+                  <div className="h-full">
+                    {fluxellePanel}
+                  </div>
+                )}
               </div>
             </div>
           </>
@@ -147,5 +173,34 @@ export function Layout({ canvas, configPanel, executionLog }: LayoutProps) {
 
       </div>
     </div>
+  );
+}
+
+// ── Right-panel tab button ────────────────────────────────────────────────────
+
+function RightTabButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active:  boolean;
+  onClick: () => void;
+  icon:    ReactNode;
+  label:   string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[11.5px] font-medium border-b-2 transition-colors ${
+        active
+          ? 'border-blue-500 text-gray-900 dark:text-white bg-white/40 dark:bg-white/[0.03]'
+          : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-black/[0.03] dark:hover:bg-white/[0.03]'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }

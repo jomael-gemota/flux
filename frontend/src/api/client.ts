@@ -601,3 +601,35 @@ export function sendTestEmail(email: string) {
     body: JSON.stringify({ email }),
   });
 }
+
+// ── Fluxelle (in-canvas AI assistant) ────────────────────────────────────────
+
+import type {
+  FluxelleStatus,
+  FluxelleChatResponse,
+  WorkflowSnapshot,
+  SkillSummary,
+  SkillDetail,
+} from '../types/fluxelle';
+
+export function getFluxelleStatus() {
+  return request<FluxelleStatus>('/fluxelle/status');
+}
+
+export function fluxelleChat(body: {
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  workflow?: WorkflowSnapshot | null;
+}) {
+  return request<FluxelleChatResponse>('/fluxelle/chat', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function listSkills() {
+  return request<{ skills: SkillSummary[] }>('/skills');
+}
+
+export function getSkill(name: string) {
+  return request<SkillDetail>(`/skills/${encodeURIComponent(name)}`);
+}

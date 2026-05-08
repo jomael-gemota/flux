@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Node, Edge } from '@xyflow/react';
 import type { WorkflowDefinition } from '../types/workflow';
+import type { WorkflowProposal } from '../types/fluxelle';
 
 export interface CanvasNodeData extends Record<string, unknown> {
   label: string;
@@ -71,6 +72,10 @@ interface WorkflowStore {
   configOpen: boolean;
   setConfigOpen: (open: boolean) => void;
 
+  // Right-panel active tab — Config (per-node settings) or Fluxelle (AI assistant)
+  rightPanelTab: 'config' | 'fluxelle';
+  setRightPanelTab: (tab: 'config' | 'fluxelle') => void;
+
   // Canvas interactivity lock — persisted per workflow ID
   interactiveLocks: Record<string, boolean>;
   isInteractive: boolean; // derived: interactiveLocks[activeWorkflow.id] ?? true
@@ -122,6 +127,13 @@ interface WorkflowStore {
   /** Disable warning modal state (shown when other nodes reference the target node) */
   nodeDisableModal: NodeDisableModal;
   setNodeDisableModal: (modal: NodeDisableModal) => void;
+
+  /**
+   * Apply a Fluxelle proposal to the canvas — additive merge: new nodes are
+   * appended, updated nodes have their config / name replaced, deletes drop
+   * the node and any edges referencing it, and proposed edges are added.
+   */
+  applyFluxelleProposal: (proposal: WorkflowProposal) => void;
 }
 
 export const useWorkflowStore = create<WorkflowStore>((set) => ({
@@ -164,6 +176,17 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
   setConfigOpen: (open) => {
     try { localStorage.setItem('wap_panel_config_open', String(open)); } catch { /* ignore */ }
     set({ configOpen: open });
+  },
+
+  rightPanelTab: (() => {
+    try {
+      const v = localStorage.getItem('wap_panel_right_tab');
+      return v === 'fluxelle' ? 'fluxelle' : 'config';
+    } catch { return 'config'; }
+  })(),
+  setRightPanelTab: (tab) => {
+    try { localStorage.setItem('wap_panel_right_tab', tab); } catch { /* ignore */ }
+    set({ rightPanelTab: tab });
   },
 
   interactiveLocks: (() => {
@@ -257,4 +280,123 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
     })),
   nodeDisableModal: { open: false, nodeId: null, dependents: [] },
   setNodeDisableModal: (modal) => set({ nodeDisableModal: modal }),
+
+  applyFluxelleProposal: (proposal) =>
+    set((state) => {
+      const deleteSet = new Set(proposal.deletes ?? []);
+
+      // Filter out workflow nodes that the proposal asks to delete; keep
+      // sticky notes intact (they are pure annotations).
+      const surviving = state.nodes.filter(
+        (n) => n.type === 'stickyNote' || !deleteSet.has(n.id),
+      );
+
+      // Apply updates onto the surviving set.
+      const updates = proposal.updates ?? [];
+      const updatedNodes = surviving.map((n) => {
+        if (n.type === 'stickyNote') return n;
+        const update = updates.find((u) => u.id === n.id);
+        if (!update) return n;
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            label:  update.name ?? n.data.label,
+            config: update.config != null
+              ? { ...n.data.config, ...update.config }
+              : n.data.config,
+          },
+        };
+      });
+
+      // Compute a starting position for newly added nodes — laid out to the
+      // right of the existing canvas content so they don't overlap.
+      const workflowNodes = updatedNodes.filter((n) => n.type !== 'stickyNote');
+      const maxX = workflowNodes.length === 0
+        ? 0
+        : Math.max(...workflowNodes.map((n) => n.position.x));
+      let nextX = workflowNodes.length === 0 ? 80 : maxX + 280;
+
+      const adds = (proposal.adds ?? []).filter((a) => !deleteSet.has(a.id));
+
+      // Fluxelle's ids may collide with existing ones; prefix-rename in that case.
+      const existingIds = new Set(updatedNodes.map((n) => n.id));
+      const idRemap = new Map<string, string>();
+      const newCanvasNodes: CanvasNode[] = adds.map((a, idx) => {
+        let id = a.id;
+        if (existingIds.has(id)) {
+          let suffix = 2;
+          while (existingIds.has(`${a.id}-${suffix}`)) suffix++;
+          id = `${a.id}-${suffix}`;
+          idRemap.set(a.id, id);
+        }
+        existingIds.add(id);
+
+        const position = a.position ?? { x: nextX, y: 80 + idx * 140 };
+        if (!a.position) nextX += 280;
+
+        return {
+          id,
+          type: 'workflowNode',
+          position,
+          data: {
+            label:    a.name,
+            nodeType: a.type,
+            config:   a.config ?? {},
+            isEntry:  a.type === 'trigger',
+          },
+        } as CanvasNode;
+      });
+
+      const mergedNodes = [...updatedNodes, ...newCanvasNodes];
+
+      // Helper: resolve an id through the remap so proposed edges that refer
+      // to a renamed new node still hit the right target.
+      const resolveId = (id: string) => idRemap.get(id) ?? id;
+
+      // Drop edges touching deleted nodes; rewrite ids through the remap.
+      const survivingEdges = state.edges
+        .filter(
+          (e) =>
+            !deleteSet.has(e.source) &&
+            !deleteSet.has(e.target),
+        )
+        .map((e) => ({
+          ...e,
+          source: resolveId(e.source),
+          target: resolveId(e.target),
+        }));
+
+      const validIds = new Set(mergedNodes.map((n) => n.id));
+      const proposedEdges: CanvasEdge[] = (proposal.edges ?? [])
+        .map((e) => ({
+          from: resolveId(e.from),
+          to:   resolveId(e.to),
+          sourceHandle: e.sourceHandle,
+          label:        e.label,
+        }))
+        .filter((e) => validIds.has(e.from) && validIds.has(e.to))
+        .map((e) => ({
+          id:           `${e.from}->${e.to}${e.sourceHandle ? `-${e.sourceHandle}` : ''}`,
+          source:       e.from,
+          target:       e.to,
+          sourceHandle: e.sourceHandle,
+          label:        e.label,
+          animated:     false,
+        }));
+
+      // De-dupe edges (existing + proposed) by id.
+      const seen = new Set<string>();
+      const mergedEdges = [...survivingEdges, ...proposedEdges].filter((e) => {
+        if (seen.has(e.id)) return false;
+        seen.add(e.id);
+        return true;
+      });
+
+      return {
+        nodes: mergedNodes,
+        edges: mergedEdges,
+        isDirty: true,
+      };
+    }),
 }));

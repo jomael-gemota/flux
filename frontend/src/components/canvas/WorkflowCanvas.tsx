@@ -221,6 +221,7 @@ export function WorkflowCanvas() {
     setEdges,
     setSelectedNodeId,
     setConfigOpen,
+    setRightPanelTab,
     activeWorkflow,
     setDirty,
     executionStatuses,
@@ -431,8 +432,11 @@ export function WorkflowCanvas() {
       if (node.type === 'stickyNote') return; // StickyNoteNode handles its own double-click
       setSelectedNodeId(node.id);
       setConfigOpen(true);
+      // Editing a node's config should always land on the Config tab even
+      // if Fluxelle is currently visible.
+      setRightPanelTab('config');
     },
-    [isInteractive, setSelectedNodeId, setConfigOpen]
+    [isInteractive, setSelectedNodeId, setConfigOpen, setRightPanelTab]
   );
 
   const onPaneClick = useCallback(() => {
@@ -601,9 +605,10 @@ export function WorkflowCanvas() {
       setNodes([...nodes, newNode]);
       setSelectedNodeId(id);
       setConfigOpen(true);
+      setRightPanelTab('config');
       setDirty(true);
     },
-    [nodes, setNodes, setSelectedNodeId, setConfigOpen, setDirty]
+    [nodes, setNodes, setSelectedNodeId, setConfigOpen, setRightPanelTab, setDirty]
   );
 
   // ── Styled edges (execution overlay) ───────────────────────────────────────

@@ -3,6 +3,7 @@ import { Layout } from './components/Layout';
 import { WorkflowCanvas } from './components/canvas/WorkflowCanvas';
 import { NodeConfigPanel } from './components/panels/NodeConfigPanel';
 import { ExecutionLogPanel } from './components/panels/ExecutionLogPanel';
+import { FluxellePanel } from './components/panels/FluxellePanel';
 import { useExecutionOverlay } from './hooks/useExecutionOverlay';
 import { useWorkflowStore } from './store/workflowStore';
 
@@ -23,6 +24,7 @@ function AppInner() {
     <Layout
       canvas={<WorkflowCanvas />}
       configPanel={<NodeConfigPanel />}
+      fluxellePanel={<FluxellePanel />}
       executionLog={<ExecutionLogPanel />}
     />
   );
