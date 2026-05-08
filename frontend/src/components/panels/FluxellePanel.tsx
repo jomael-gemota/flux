@@ -32,6 +32,7 @@ import {
   useUpdateConversation,
   useDeleteConversation,
 } from '../../hooks/useFluxelle';
+import * as api from '../../api/client';
 import type {
   FluxelleMessage,
   WorkflowProposal,
@@ -236,6 +237,8 @@ export function FluxellePanel() {
   }
 
   function startNewConversation() {
+    loadingConvIdRef.current = null;
+    setIsLoadingConv(false);
     setMessages([]);
     setAppliedIds(new Set());
     setActiveConvId(null);
@@ -243,29 +246,38 @@ export function FluxellePanel() {
     setTimeout(() => textareaRef.current?.focus(), 50);
   }
 
-  function loadConversation(conv: ConversationSummary) {
-    // Fetch full messages from the list cache (they're already included in the
-    // summary endpoint for small conversations), or fall back to summary.
-    // We need full messages, so we use the detail endpoint via the hook.
-    // For simplicity, stash the conversationId and messages from the list, then
-    // upgrade to full messages on demand.  Here we trigger a detail fetch by
-    // using the already-loaded detail if available, or prompt a load.
+  /** Tracks the in-flight conversation load so a fast-switching user can't
+   *  have an older request overwrite a newer one's results. */
+  const loadingConvIdRef = useRef<string | null>(null);
+  const [isLoadingConv, setIsLoadingConv] = useState(false);
+
+  async function loadConversation(conv: ConversationSummary) {
+    setView('chat');
     setActiveConvId(conv.conversationId);
     setAppliedIds(new Set());
-    setView('chat');
-    // Messages will be loaded by useEffect below when activeConvId changes
-    // and we know we're loading a historical conversation.
-  }
+    setMessages([]);
 
-  // When activeConvId is set from history (messages array is empty), load the full conversation.
-  useEffect(() => {
-    if (!activeConvId || messages.length > 0) return;
-    import('../../api/client').then(({ getConversation }) => {
-      getConversation(activeConvId).then((conv) => {
-        setMessages(fromPersistedMessages(conv.messages));
-      }).catch(() => {/* silently ignore if not found */});
-    });
-  }, [activeConvId]); // eslint-disable-line react-hooks/exhaustive-deps
+    loadingConvIdRef.current = conv.conversationId;
+    setIsLoadingConv(true);
+    try {
+      const detail = await api.getConversation(conv.conversationId);
+      // Drop the result if the user already moved on to another conversation.
+      if (loadingConvIdRef.current !== conv.conversationId) return;
+      setMessages(fromPersistedMessages(detail.messages));
+    } catch (err) {
+      if (loadingConvIdRef.current !== conv.conversationId) return;
+      setMessages([{
+        id:        randomId(),
+        role:      'assistant',
+        content:   `❌ Couldn't load this conversation: ${err instanceof Error ? err.message : 'unknown error'}`,
+        createdAt: new Date().toISOString(),
+      }]);
+    } finally {
+      if (loadingConvIdRef.current === conv.conversationId) {
+        setIsLoadingConv(false);
+      }
+    }
+  }
 
   function handleDeleteConversation(convId: string) {
     deleteConv.mutate(convId, {
@@ -409,9 +421,16 @@ export function FluxellePanel() {
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-3">
-        {messages.length === 0 && <EmptyState onPick={(p) => void send(p)} />}
+        {isLoadingConv && (
+          <div className="flex items-center justify-center py-8 text-slate-400 dark:text-slate-500 text-xs gap-2">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Loading conversation…
+          </div>
+        )}
 
-        {messages.map((m) => (
+        {!isLoadingConv && messages.length === 0 && <EmptyState onPick={(p) => void send(p)} />}
+
+        {!isLoadingConv && messages.map((m) => (
           <MessageBubble
             key={m.id}
             message={m}

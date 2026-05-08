@@ -86,7 +86,7 @@ export interface FluxelleChatResponse {
 
 // ── Service ──────────────────────────────────────────────────────────────────
 
-const DEFAULT_MODEL = process.env.FLUXELLE_MODEL ?? 'gpt-4o-mini';
+const DEFAULT_MODEL = process.env.FLUXELLE_MODEL ?? 'gpt-5.5';
 const MAX_TOOL_HOPS = 6;
 
 export class FluxelleService {

@@ -77,7 +77,7 @@ export async function fluxelleRoutes(
         { preHandler: apiKeyAuth },
         async () => ({
             configured: fluxelle.isConfigured(),
-            model:      process.env.FLUXELLE_MODEL ?? 'gpt-4o-mini',
+            model:      process.env.FLUXELLE_MODEL ?? 'gpt-5.5',
         }),
     );
 
