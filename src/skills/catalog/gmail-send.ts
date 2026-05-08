@@ -18,10 +18,12 @@ Sends an email from a connected Google account.
 
 ## Required config
 - \`credentialId\` (string): Id of the user's connected Google credential.
-  Leave \`""\` if unknown and instruct the user to connect Google.
+  Call \`list_credentials({ provider: "google" })\` to find it. If none are
+  connected, tell the user to add one via Settings → Credentials.
 - \`action\` (string): Must be \`"send"\`.
 - \`to\` (string): Recipient email — comma-separated for multiple recipients.
-  Supports template expressions.
+  Supports template expressions. Always ask the user for the recipient address
+  if it has not been provided; do not leave this field blank.
 - \`subject\` (string): Email subject. Supports template expressions.
 - \`body\` (string): Plain-text or HTML body. Supports template expressions.
 

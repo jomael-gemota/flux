@@ -21,6 +21,9 @@ Fires the workflow on a cron schedule.
     - \`"*/15 * * * *"\` — every 15 minutes
     - \`"0 9 * * 1-5"\` — 9:00 AM on weekdays
     - \`"0 0 1 * *"\` — midnight on the 1st of every month
+    - \`"0 8 * * 1"\` — every Monday at 8:00 AM
+    - \`"0 0 * * *"\` — every day at midnight
+    - \`"0 */6 * * *"\` — every 6 hours
 
 ## Output fields
 - \`triggerType\`: \`"cron"\`
@@ -37,8 +40,17 @@ Fires the workflow on a cron schedule.
 }
 \`\`\`
 
-If the user describes a schedule in plain English, translate it to a cron
-expression and put it in \`cronExpression\`. If you're unsure, ask the user
-to confirm before adding the node.
+## Fluxelle workflow
+1. If the user hasn't specified a schedule, use \`ask_user\` to present common
+   options:
+   - Every 15 minutes
+   - Every hour
+   - Every day at 9 AM
+   - Every weekday at 9 AM
+   - Every Monday at 8 AM
+   - Custom (ask them to describe)
+2. Translate the chosen option (or plain-English description) to a cron
+   expression and populate \`cronExpression\`.
+3. Always confirm the translated schedule with the user before proposing.
 `,
 };

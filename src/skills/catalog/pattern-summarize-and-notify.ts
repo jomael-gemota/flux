@@ -68,8 +68,11 @@ trigger-1  →  llm-1 (summarize)  →  slack-1 / teams-1 / gmail-1
 ]
 \`\`\`
 
-When the user invokes this pattern, propose ALL three nodes in a single
-\`propose_workflow_changes\` call and connect them with edges:
-\`trigger-1 → llm-1 → slack-1\`.
+When the user invokes this pattern, first call \`list_credentials\` to find
+the right credential for the notification node, then call the appropriate
+\`list_slack_channels\` / \`list_teams\` / etc. tool, present choices via
+\`ask_user\`, and only once you have a confirmed \`credentialId\` and
+target, propose ALL nodes in a single \`propose_workflow_changes\` call
+with fully-populated config (no empty string ids).
 `,
 };

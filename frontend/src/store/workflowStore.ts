@@ -136,6 +136,20 @@ interface WorkflowStore {
   applyFluxelleProposal: (proposal: WorkflowProposal) => void;
 
   /**
+   * Incremented each time applyFluxelleProposal is called.
+   * NodeConfigPanel subscribes to this to know when to re-sync its local draft
+   * from the store (avoiding stale-draft overwrites when Fluxelle edits a
+   * node that is currently open in the config panel).
+   */
+  proposalVersion: number;
+
+  /**
+   * Node ids (adds + updates) touched by the most-recent applyFluxelleProposal
+   * call. NodeConfigPanel uses this to decide whether to reset its draft.
+   */
+  lastProposalAffectedIds: string[];
+
+  /**
    * Set to true by applyFluxelleProposal so WorkflowCanvas can call fitView
    * and bring newly added nodes into the viewport. Cleared by the canvas
    * after it fires the animation.
@@ -401,15 +415,28 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
         return true;
       });
 
+      // Track which node ids were touched so NodeConfigPanel can re-sync its
+      // local draft when the selected node is part of this proposal.
+      const affectedIds = [
+        ...(proposal.updates ?? []).map((u) => u.id),
+        ...adds.map((a) => idRemap.get(a.id) ?? a.id),
+        ...(proposal.deletes ?? []),
+      ];
+
       return {
         nodes: mergedNodes,
         edges: mergedEdges,
         isDirty: true,
         // Signal WorkflowCanvas to fit the viewport so newly added nodes are visible.
         pendingFitView: (proposal.adds?.length ?? 0) > 0,
+        // Signal NodeConfigPanel to re-sync its draft for affected nodes.
+        proposalVersion: state.proposalVersion + 1,
+        lastProposalAffectedIds: affectedIds,
       };
     }),
 
+  proposalVersion: 0,
+  lastProposalAffectedIds: [],
   pendingFitView: false,
   clearFitView: () => set({ pendingFitView: false }),
 }));

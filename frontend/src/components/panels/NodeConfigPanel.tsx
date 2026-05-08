@@ -3456,7 +3456,8 @@ interface NodeDraft {
 }
 
 export function NodeConfigPanel() {
-  const { nodes, edges, selectedNodeId, setNodes, setEdges, setSelectedNodeId, activeWorkflow, setActiveWorkflow } =
+  const { nodes, edges, selectedNodeId, setNodes, setEdges, setSelectedNodeId, activeWorkflow, setActiveWorkflow,
+    proposalVersion, lastProposalAffectedIds } =
     useWorkflowStore();
 
   const { save: saveWorkflow, isSaving: isSavingDisabled } = useSaveWorkflow();
@@ -3476,7 +3477,9 @@ export function NodeConfigPanel() {
     open: false, title: '', message: '',
   });
 
-  // Reset draft whenever a different node is selected
+  // Reset draft whenever a different node is selected.
+  // Intentionally omits `nodes` from deps — we only want to reset on selection
+  // change, not on every store update (which would stomp in-progress edits).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const node = nodes.find((n) => n.id === selectedNodeId);
@@ -3493,6 +3496,27 @@ export function NodeConfigPanel() {
     setSaveSuccess(false);
     setIsSavingNode(false);
   }, [selectedNodeId]); // intentionally omits `nodes` — only reset on selection change
+
+  // Re-sync the draft from the store when a Fluxelle proposal is applied that
+  // touches the currently selected node. This ensures the panel immediately
+  // reflects the new config rather than showing stale draft values.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (proposalVersion === 0) return; // skip initial mount
+    if (!selectedNodeId || !lastProposalAffectedIds.includes(selectedNodeId)) return;
+    const node = nodes.find((n) => n.id === selectedNodeId);
+    if (!node) return;
+    const snapshot: NodeDraft = {
+      label:        node.data.label,
+      config:       { ...(node.data.config as Record<string, unknown>) },
+      retries:      node.data.retries,
+      retryDelayMs: node.data.retryDelayMs,
+      timeoutMs:    node.data.timeoutMs,
+    };
+    setOriginalSnapshot({ ...snapshot, config: { ...snapshot.config } });
+    setDraft({ ...snapshot, config: { ...snapshot.config } });
+    setSaveSuccess(false);
+  }, [proposalVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // State for the disable-confirmation modal (must be before any early return)
   const [disableModal, setDisableModal] = useState<{ open: boolean; dependents: CanvasNode[] }>({

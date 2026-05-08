@@ -46,5 +46,18 @@ Sends a request to any URL and returns the response.
   "next": []
 }
 \`\`\`
+
+## Fluxelle workflow
+1. If the user hasn't specified the HTTP method, use \`ask_user\` with options:
+   - GET (retrieve data)
+   - POST (create / send data)
+   - PUT (replace a resource)
+   - PATCH (partial update)
+   - DELETE (remove a resource)
+2. Always populate \`url\` — ask for it if not provided.
+3. For authenticated APIs, include the \`Authorization\` header with the correct
+   scheme (Bearer token, Basic auth, API key header, etc.).
+4. Use template expressions in \`url\` and \`body\` to pass dynamic data from
+   upstream nodes.
 `,
 };

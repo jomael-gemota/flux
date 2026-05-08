@@ -65,5 +65,16 @@ the response text.
 - Reference earlier-node output explicitly in the prompt so the model has context.
 - If the user wants the AI to output JSON, instruct it in the \`systemPrompt\`
   and add a downstream **Extract** node to parse fields out of \`content\`.
+
+## Fluxelle workflow
+1. If the user hasn't specified a provider/model, use \`ask_user\` to present
+   choices. Recommended defaults to offer:
+   - **OpenAI GPT-4o mini** (fast, affordable — good for most tasks)
+   - **OpenAI GPT-4o** (most capable, best quality)
+   - **Anthropic Claude 3.5 Sonnet** (excellent reasoning)
+   - **Google Gemini 2.0 Flash** (fast, multimodal)
+2. Map their choice to the correct \`provider\` + \`model\` values.
+3. If the user's prompt intent is clear, propose the node with a sensible
+   \`systemPrompt\` already filled in — don't leave it blank.
 `,
 };

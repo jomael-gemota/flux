@@ -27,10 +27,11 @@ Routes execution to one of two next-nodes based on a boolean expression.
 - Equality: \`"eq"\`, \`"neq"\`
 - Comparison: \`"gt"\`, \`"gte"\`, \`"lt"\`, \`"lte"\`
 - String: \`"contains"\`, \`"startsWith"\`, \`"endsWith"\`
-- Existence: \`"isTruthy"\`, \`"isFalsy"\`, \`"isEmpty"\`, \`"isNotEmpty"\`
+- Null checks: \`"isNull"\`, \`"isNotNull"\`
 
 ## Compound conditions
-Use \`{ "type": "and", "items": [<leaf>, <leaf>] }\` or \`{ "type": "or", "items": [...] }\`.
+Use \`{ "type": "group", "operator": "and", "conditions": [<leaf>, <leaf>] }\`
+or \`{ "type": "group", "operator": "or", "conditions": [...] }\`.
 
 ## Example — only continue if AI classified as "urgent"
 \`\`\`json
@@ -56,5 +57,13 @@ Use \`{ "type": "and", "items": [<leaf>, <leaf>] }\` or \`{ "type": "or", "items
 The \`next\` array stays empty for condition nodes — routing is determined by
 \`trueNext\` / \`falseNext\` only. When proposing a condition node, you MUST
 also include the two follow-up nodes in your proposal so they can be wired up.
+
+## Fluxelle workflow
+1. If the user hasn't specified what to check, use \`ask_user\` with context-
+   appropriate options (e.g., field names from an upstream node output).
+2. If the user says "if X equals Y", pick \`"eq"\`; "greater than" → \`"gt"\`;
+   "contains" → \`"contains"\`; "is empty" → \`"isNull"\` or check length.
+3. Always propose BOTH the true-branch node and the false-branch node (even if
+   one is just an output/no-op) so the graph is complete.
 `,
 };

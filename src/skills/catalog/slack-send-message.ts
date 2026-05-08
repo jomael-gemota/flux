@@ -19,10 +19,12 @@ credential.
 
 ## Required config
 - \`credentialId\` (string): Id of the user's connected Slack credential.
-  If you don't know it, leave it as an empty string \`""\` and tell the user
-  they need to connect Slack via Settings → Credentials.
+  Call \`list_credentials({ provider: "slack" })\` to find it. If none are
+  connected, tell the user to add one via Settings → Credentials.
 - \`action\` (string): Must be \`"send_message"\`.
 - \`channels\` (string): Comma-separated channel names or ids — e.g. \`"#general,#alerts"\` or \`"C0123,C0456"\`.
+  After resolving \`credentialId\`, call \`list_slack_channels\` and present
+  matching channels via \`ask_user\` rather than leaving this blank.
 - \`text\` (string): Message body. Supports template expressions like \`{{ nodes.<id>.output.<field> }}\`.
 
 ## Optional config

@@ -6,28 +6,75 @@ import { skill as triggerCron }              from './catalog/trigger-cron';
 import { skill as llmPrompt }                from './catalog/llm-prompt';
 import { skill as httpRequest }              from './catalog/http-request';
 import { skill as conditionBranch }          from './catalog/condition-branch';
+import { skill as switchNode }               from './catalog/switch-node';
 import { skill as slackSendMessage }         from './catalog/slack-send-message';
+import { skill as slackSendDm }              from './catalog/slack-send-dm';
+import { skill as slackRead }                from './catalog/slack-read';
+import { skill as slackUploadFile }          from './catalog/slack-upload-file';
 import { skill as gmailSend }                from './catalog/gmail-send';
+import { skill as gmailRead }                from './catalog/gmail-read';
+import { skill as gmailReply }               from './catalog/gmail-reply';
 import { skill as gsheetsAppendRow }         from './catalog/gsheets-append-row';
+import { skill as gsheetsRead }              from './catalog/gsheets-read';
+import { skill as gsheetsManage }            from './catalog/gsheets-manage';
 import { skill as teamsSendMessage }         from './catalog/teams-send-message';
+import { skill as teamsSendDm }              from './catalog/teams-send-dm';
+import { skill as teamsRead }                from './catalog/teams-read';
+import { skill as gdrive }                   from './catalog/gdrive';
+import { skill as gdocs }                    from './catalog/gdocs';
+import { skill as basecamp }                 from './catalog/basecamp';
+import { skill as extract }                  from './catalog/extract';
+import { skill as messageFormatter }         from './catalog/message-formatter';
+import { skill as loop }                     from './catalog/loop';
+import { skill as code }                     from './catalog/code';
 import { skill as transformReshape }         from './catalog/transform-reshape';
 import { skill as outputResult }             from './catalog/output-result';
 import { skill as patternSummarizeAndNotify } from './catalog/pattern-summarize-and-notify';
 import { skill as patternFormToSpreadsheet }  from './catalog/pattern-form-to-spreadsheet';
 
 const ALL_SKILLS: Skill[] = [
+    // Triggers
     triggerManual,
     triggerWebhook,
     triggerCron,
+    // AI
     llmPrompt,
-    httpRequest,
+    // Logic
     conditionBranch,
-    slackSendMessage,
-    gmailSend,
-    gsheetsAppendRow,
-    teamsSendMessage,
+    switchNode,
+    // Data
     transformReshape,
+    extract,
+    loop,
+    code,
     outputResult,
+    messageFormatter,
+    // HTTP
+    httpRequest,
+    // Slack
+    slackSendMessage,
+    slackSendDm,
+    slackRead,
+    slackUploadFile,
+    // Gmail
+    gmailSend,
+    gmailRead,
+    gmailReply,
+    // Google Sheets
+    gsheetsAppendRow,
+    gsheetsRead,
+    gsheetsManage,
+    // Google Drive
+    gdrive,
+    // Google Docs
+    gdocs,
+    // Teams
+    teamsSendMessage,
+    teamsSendDm,
+    teamsRead,
+    // Basecamp
+    basecamp,
+    // Patterns
     patternSummarizeAndNotify,
     patternFormToSpreadsheet,
 ];

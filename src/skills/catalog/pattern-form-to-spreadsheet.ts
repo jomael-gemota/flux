@@ -48,7 +48,14 @@ A 2-node template:
 ]
 \`\`\`
 
-If the user hasn't told you the spreadsheet id or the column shape, leave
-those fields empty and tell them which fields to fill in after applying.
+## Fluxelle workflow
+1. Call \`list_credentials({ provider: "google" })\` → resolve \`credentialId\`.
+2. Call \`list_gsheets\` → present via \`ask_user\` to pick the spreadsheet.
+3. Call \`list_gsheet_tabs\` → present tab names via \`ask_user\`.
+4. Ask which fields from the incoming webhook body to log (e.g. name, email, message).
+5. Propose ALL nodes in one \`propose_workflow_changes\` call with fully-populated config.
+
+The \`values\` array should reference \`{{ nodes.trigger-1.output.body.<field> }}\` for
+each piece of data the user wants to capture.
 `,
 };

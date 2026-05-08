@@ -18,9 +18,13 @@ Adds a new row to the bottom of a sheet range.
 
 ## Required config
 - \`credentialId\` (string): Connected Google credential id.
+  Call \`list_credentials({ provider: "google" })\` to find it.
 - \`action\` (string): Must be \`"append"\`.
 - \`spreadsheetId\` (string): The Google Sheets document id (the long id from its URL).
+  Call \`list_gsheets\` and present options via \`ask_user\` — never leave blank.
 - \`range\` (string): A1-notation range — e.g. \`"Sheet1!A:Z"\`.
+  After the user picks a spreadsheet, call \`list_gsheet_tabs\` to offer real
+  tab names. Combine with column range: \`"<TabName>!A:Z"\`.
 - \`values\` (array): One row as an array of cell values, e.g. \`["{{ nodes.trigger-1.output.body.name }}", "{{ nodes.trigger-1.output.body.email }}"]\`.
   May also be an array-of-arrays for multiple rows.
 

@@ -17,9 +17,14 @@ Posts a message to a specific Teams channel via Microsoft Graph.
 
 ## Required config
 - \`credentialId\` (string): Connected Teams credential id.
+  Call \`list_credentials({ provider: "teams" })\` to find it.
 - \`action\` (string): Must be \`"send_message"\`.
 - \`teamId\` (string): Microsoft Teams team id (guid).
+  After resolving \`credentialId\`, call \`list_teams\` and present options via
+  \`ask_user\` — never leave this blank.
 - \`channelId\` (string): Channel id within that team.
+  After the user picks a team, call \`list_teams_channels\` and present options
+  via \`ask_user\`.
 - \`text\` (string): Message body. Supports template expressions and basic HTML.
 
 ## Output fields
@@ -32,17 +37,14 @@ Posts a message to a specific Teams channel via Microsoft Graph.
   "type": "teams",
   "name": "Notify Engineering",
   "config": {
-    "credentialId": "",
+    "credentialId": "<resolved-from-list_credentials>",
     "action": "send_message",
-    "teamId": "",
-    "channelId": "",
+    "teamId": "<resolved-from-list_teams>",
+    "channelId": "<resolved-from-list_teams_channels>",
     "text": "{{ nodes.llm-1.output.content }}"
   },
   "next": []
 }
 \`\`\`
-
-If the user doesn't know the team / channel ids, leave them empty and tell
-them to fill them in via the Config panel after applying.
 `,
 };

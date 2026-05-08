@@ -26,6 +26,7 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { useWorkflowStore } from '../../store/workflowStore';
+import { useSaveWorkflow } from '../../hooks/useSaveWorkflow';
 import {
   useFluxelleChat,
   useFluxelleStatus,
@@ -136,6 +137,7 @@ export function FluxellePanel() {
   const createConv  = useCreateConversation();
   const updateConv  = useUpdateConversation();
   const deleteConv  = useDeleteConversation();
+  const { save: saveWorkflow } = useSaveWorkflow();
 
   const nodes         = useWorkflowStore((s) => s.nodes);
   const edges         = useWorkflowStore((s) => s.edges);
@@ -330,12 +332,21 @@ export function FluxellePanel() {
 
   /** Mark a message's proposal as applied AND apply it to the canvas. */
   function handleApply(messageId: string, proposal: WorkflowProposal) {
+    // 1. Mutate the canvas store (sets isDirty, bumps proposalVersion so the
+    //    NodeConfigPanel re-syncs its draft for any selected node that was affected).
     applyProposal(proposal);
+
+    // 2. Mark the proposal as applied in the conversation history.
     const updated = messages.map((m) =>
       m.id === messageId ? { ...m, proposalStatus: 'applied' as const } : m,
     );
     setMessages(updated);
     void persistMessages(updated);
+
+    // 3. Auto-save the workflow so the changes are persisted immediately.
+    //    We fire-and-forget — save errors are surfaced by the global error handler
+    //    and the user can always Ctrl+S to retry.
+    void saveWorkflow();
   }
 
   /** Mark a message's proposal as declined — no canvas changes are made. */
