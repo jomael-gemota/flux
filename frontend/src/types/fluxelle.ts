@@ -76,3 +76,29 @@ export interface SkillSummary {
 export interface SkillDetail extends SkillSummary {
   body: string;
 }
+
+// ── Conversation history ──────────────────────────────────────────────────────
+
+/** A single persisted message inside a saved conversation. */
+export interface PersistedMessage {
+  role:      'user' | 'assistant';
+  content:   string;
+  proposal?: WorkflowProposal | null;
+  createdAt: string;
+}
+
+/** Summary row used in the history list. */
+export interface ConversationSummary {
+  conversationId: string;
+  title:          string;
+  workflowId?:    string;
+  workflowName?:  string;
+  messageCount:   number;
+  createdAt:      string;
+  updatedAt:      string;
+}
+
+/** Full conversation with all messages. */
+export interface ConversationDetail extends ConversationSummary {
+  messages: PersistedMessage[];
+}

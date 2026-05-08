@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react';
 import {
   Sparkles,
   Send,
@@ -11,10 +18,27 @@ import {
   Check,
   RotateCcw,
   Lightbulb,
+  History,
+  ArrowLeft,
+  MessageSquare,
+  Clock,
 } from 'lucide-react';
 import { useWorkflowStore } from '../../store/workflowStore';
-import { useFluxelleChat, useFluxelleStatus } from '../../hooks/useFluxelle';
-import type { FluxelleMessage, WorkflowProposal, WorkflowSnapshot } from '../../types/fluxelle';
+import {
+  useFluxelleChat,
+  useFluxelleStatus,
+  useConversations,
+  useCreateConversation,
+  useUpdateConversation,
+  useDeleteConversation,
+} from '../../hooks/useFluxelle';
+import type {
+  FluxelleMessage,
+  WorkflowProposal,
+  WorkflowSnapshot,
+  ConversationSummary,
+  PersistedMessage,
+} from '../../types/fluxelle';
 import type { NodeType } from '../../types/workflow';
 import { NodeIcon } from '../nodes/NodeIcons';
 
@@ -25,39 +49,101 @@ const STARTER_PROMPTS: string[] = [
   'Log every form submission as a row in a Google Sheet.',
 ];
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function randomId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function shortJson(obj: unknown, max = 240): string {
+  let s: string;
+  try { s = JSON.stringify(obj); } catch { return '{ … }'; }
+  return s.length > max ? s.slice(0, max - 1) + '…' : s;
+}
+
+function formatRelativeTime(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffDays = Math.floor(diffMs / 86_400_000);
+
+  if (diffDays === 0) {
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7)  return `${diffDays}d ago`;
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+/** Derive a title from the first user message. */
+function titleFromMessage(content: string): string {
+  return content.length > 80 ? content.slice(0, 77) + '…' : content;
+}
+
+/** Convert in-memory FluxelleMessage[] → PersistedMessage[] for the API. */
+function toPersistedMessages(msgs: FluxelleMessage[]): PersistedMessage[] {
+  return msgs.map((m) => ({
+    role:      m.role,
+    content:   m.content,
+    proposal:  m.proposal ?? null,
+    createdAt: m.createdAt,
+  }));
+}
+
+/** Convert PersistedMessage[] back to in-memory FluxelleMessage[]. */
+function fromPersistedMessages(msgs: PersistedMessage[]): FluxelleMessage[] {
+  return msgs.map((m) => ({
+    id:        randomId(),
+    role:      m.role,
+    content:   m.content,
+    proposal:  m.proposal ?? undefined,
+    createdAt: m.createdAt,
+  }));
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+type PanelView = 'chat' | 'history';
+
 export function FluxellePanel() {
   const status   = useFluxelleStatus();
   const chat     = useFluxelleChat();
+  const convList = useConversations();
+  const createConv  = useCreateConversation();
+  const updateConv  = useUpdateConversation();
+  const deleteConv  = useDeleteConversation();
 
-  const nodes        = useWorkflowStore((s) => s.nodes);
-  const edges        = useWorkflowStore((s) => s.edges);
-  const activeWf     = useWorkflowStore((s) => s.activeWorkflow);
+  const nodes         = useWorkflowStore((s) => s.nodes);
+  const edges         = useWorkflowStore((s) => s.edges);
+  const activeWf      = useWorkflowStore((s) => s.activeWorkflow);
   const applyProposal = useWorkflowStore((s) => s.applyFluxelleProposal);
 
+  // ── Local state ──────────────────────────────────────────────────────────────
+  const [view, setView]         = useState<PanelView>('chat');
   const [messages, setMessages] = useState<FluxelleMessage[]>([]);
   const [input, setInput]       = useState('');
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
-  const scrollRef   = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /** conversationId of the currently active (auto-saved) conversation. */
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const scrollRef    = useRef<HTMLDivElement>(null);
+  const textareaRef  = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll on new messages / loading state
+  // Auto-scroll
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [messages, chat.isPending]);
 
-  // ── Workflow snapshot (compact) ──────────────────────────────────────────────
+  // ── Workflow snapshot ────────────────────────────────────────────────────────
   const snapshot = useMemo<WorkflowSnapshot | null>(() => {
     if (!activeWf) return null;
-
     const workflowNodes = nodes.filter((n) => n.type !== 'stickyNote');
     const nextMap: Record<string, string[]> = {};
     for (const n of workflowNodes) nextMap[n.id] = [];
     for (const e of edges) {
       if (e.source && e.target && nextMap[e.source]) nextMap[e.source].push(e.target);
     }
-
     return {
       id:          activeWf.id,
       name:        activeWf.name,
@@ -73,7 +159,6 @@ export function FluxellePanel() {
   }, [nodes, edges, activeWf]);
 
   // ── Send a message ───────────────────────────────────────────────────────────
-
   async function send(content: string) {
     const text = content.trim();
     if (!text || chat.isPending) return;
@@ -100,7 +185,26 @@ export function FluxellePanel() {
         proposal:  response.proposal,
         createdAt: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      const allMessages = [...nextMessages, assistantMsg];
+      setMessages(allMessages);
+
+      // ── Auto-save ────────────────────────────────────────────────────────────
+      const persisted = toPersistedMessages(allMessages);
+      if (!activeConvId) {
+        // First turn — create a new conversation record.
+        const title = titleFromMessage(text);
+        createConv.mutate(
+          {
+            title,
+            workflowId:   activeWf?.id,
+            workflowName: activeWf?.name,
+            messages:     persisted,
+          },
+          { onSuccess: (conv) => setActiveConvId(conv.conversationId) },
+        );
+      } else {
+        updateConv.mutate({ id: activeConvId, body: { messages: persisted } });
+      }
     } catch (err) {
       const errorMsg: FluxelleMessage = {
         id:        randomId(),
@@ -131,13 +235,49 @@ export function FluxellePanel() {
     setAppliedIds((prev) => new Set(prev).add(messageId));
   }
 
-  function resetConversation() {
+  function startNewConversation() {
     setMessages([]);
     setAppliedIds(new Set());
+    setActiveConvId(null);
+    setView('chat');
+    setTimeout(() => textareaRef.current?.focus(), 50);
   }
 
-  // ── Empty / not-configured states ────────────────────────────────────────────
+  function loadConversation(conv: ConversationSummary) {
+    // Fetch full messages from the list cache (they're already included in the
+    // summary endpoint for small conversations), or fall back to summary.
+    // We need full messages, so we use the detail endpoint via the hook.
+    // For simplicity, stash the conversationId and messages from the list, then
+    // upgrade to full messages on demand.  Here we trigger a detail fetch by
+    // using the already-loaded detail if available, or prompt a load.
+    setActiveConvId(conv.conversationId);
+    setAppliedIds(new Set());
+    setView('chat');
+    // Messages will be loaded by useEffect below when activeConvId changes
+    // and we know we're loading a historical conversation.
+  }
 
+  // When activeConvId is set from history (messages array is empty), load the full conversation.
+  useEffect(() => {
+    if (!activeConvId || messages.length > 0) return;
+    import('../../api/client').then(({ getConversation }) => {
+      getConversation(activeConvId).then((conv) => {
+        setMessages(fromPersistedMessages(conv.messages));
+      }).catch(() => {/* silently ignore if not found */});
+    });
+  }, [activeConvId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleDeleteConversation(convId: string) {
+    deleteConv.mutate(convId, {
+      onSuccess: () => {
+        if (activeConvId === convId) {
+          startNewConversation();
+        }
+      },
+    });
+  }
+
+  // ── Not-configured states ────────────────────────────────────────────────────
   if (status.isLoading) {
     return (
       <div className="h-full flex items-center justify-center text-slate-400 dark:text-slate-500 text-xs">
@@ -163,32 +303,108 @@ export function FluxellePanel() {
     );
   }
 
-  // ── Main UI ──────────────────────────────────────────────────────────────────
+  // ── History view ─────────────────────────────────────────────────────────────
+  if (view === 'history') {
+    return (
+      <div className="h-full flex flex-col">
+        {/* Header */}
+        <div className="px-3 py-2.5 border-b border-black/[0.07] dark:border-white/10 flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setView('chat')}
+            className="p-1 rounded-md text-slate-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+            title="Back to chat"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className="text-[12.5px] font-semibold text-gray-900 dark:text-white leading-tight">
+              Chat History
+            </div>
+            <div className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight">
+              {convList.data?.length ?? 0} conversation{(convList.data?.length ?? 0) !== 1 ? 's' : ''}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={startNewConversation}
+            className="flex items-center gap-1 px-2 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-[10.5px] font-semibold transition-colors"
+            title="New conversation"
+          >
+            <Plus className="w-3 h-3" />
+            New
+          </button>
+        </div>
 
+        {/* List */}
+        <div className="flex-1 min-h-0 overflow-y-auto py-1.5">
+          {convList.isLoading && (
+            <div className="flex items-center justify-center py-8 text-slate-400 text-xs gap-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Loading…
+            </div>
+          )}
+
+          {!convList.isLoading && (convList.data?.length ?? 0) === 0 && (
+            <div className="flex flex-col items-center justify-center py-10 text-center px-4 gap-2">
+              <MessageSquare className="w-8 h-8 text-slate-300 dark:text-slate-600" />
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                No saved conversations yet.
+                <br />Start a chat and it will appear here.
+              </p>
+            </div>
+          )}
+
+          {convList.data?.map((conv) => (
+            <ConversationRow
+              key={conv.conversationId}
+              conv={conv}
+              isActive={conv.conversationId === activeConvId}
+              onOpen={() => loadConversation(conv)}
+              onDelete={() => handleDeleteConversation(conv.conversationId)}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Chat view ────────────────────────────────────────────────────────────────
   return (
     <div className="h-full flex flex-col">
-
       {/* Header */}
       <div className="px-3 py-2.5 border-b border-black/[0.07] dark:border-white/10 flex items-center gap-2 shrink-0">
-        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-sm">
+        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-sm shrink-0">
           <Sparkles className="w-3.5 h-3.5 text-white" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-[12.5px] font-semibold text-gray-900 dark:text-white leading-tight">Fluxelle</div>
           <div className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight">
-            Your in-canvas workflow assistant
+            {activeConvId
+              ? (convList.data?.find((c) => c.conversationId === activeConvId)?.title ?? 'Conversation')
+              : 'Your in-canvas workflow assistant'}
           </div>
         </div>
-        {messages.length > 0 && (
+        <div className="flex items-center gap-1">
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={startNewConversation}
+              title="New conversation"
+              className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
             type="button"
-            onClick={resetConversation}
-            title="Clear conversation"
+            onClick={() => setView('history')}
+            title="Chat history"
             className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
+            <History className="w-3.5 h-3.5" />
           </button>
-        )}
+        </div>
       </div>
 
       {/* Messages */}
@@ -244,6 +460,65 @@ export function FluxellePanel() {
           Fluxelle never edits the canvas without your approval.
         </p>
       </form>
+    </div>
+  );
+}
+
+// ── History row ───────────────────────────────────────────────────────────────
+
+function ConversationRow({
+  conv,
+  isActive,
+  onOpen,
+  onDelete,
+}: {
+  conv:     ConversationSummary;
+  isActive: boolean;
+  onOpen:   () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      className={`group flex items-start gap-2 px-3 py-2.5 cursor-pointer transition-colors ${
+        isActive
+          ? 'bg-violet-50 dark:bg-violet-950/30'
+          : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]'
+      }`}
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === 'Enter' && onOpen()}
+    >
+      <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0 mt-0.5">
+        <Sparkles className="w-3 h-3 text-white" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-[11.5px] font-medium text-gray-900 dark:text-slate-200 truncate leading-snug">
+          {conv.title}
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          {conv.workflowName && (
+            <span className="text-[9.5px] px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium truncate max-w-[80px]">
+              {conv.workflowName}
+            </span>
+          )}
+          <div className="flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500">
+            <Clock className="w-2.5 h-2.5" />
+            {formatRelativeTime(conv.updatedAt)}
+          </div>
+          <span className="text-[10px] text-slate-400 dark:text-slate-500">
+            · {conv.messageCount} msg{conv.messageCount !== 1 ? 's' : ''}
+          </span>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all shrink-0 mt-0.5"
+        title="Delete conversation"
+      >
+        <Trash2 className="w-3 h-3" />
+      </button>
     </div>
   );
 }
@@ -337,8 +612,8 @@ function ProposalCard({
   onApply,
 }: {
   proposal: WorkflowProposal;
-  applied: boolean;
-  onApply: () => void;
+  applied:  boolean;
+  onApply:  () => void;
 }) {
   const adds    = proposal.adds    ?? [];
   const updates = proposal.updates ?? [];
@@ -436,16 +711,4 @@ function ProposalCard({
       </div>
     </div>
   );
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function randomId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function shortJson(obj: unknown, max = 240): string {
-  let s: string;
-  try { s = JSON.stringify(obj); } catch { return '{ … }'; }
-  return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }

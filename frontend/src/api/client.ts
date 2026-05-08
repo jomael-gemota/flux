@@ -639,3 +639,47 @@ export function listSkills() {
 export function getSkill(name: string) {
   return request<SkillDetail>(`/skills/${encodeURIComponent(name)}`);
 }
+
+// ── Fluxelle conversation history ─────────────────────────────────────────────
+
+import type {
+  ConversationSummary,
+  ConversationDetail,
+  PersistedMessage,
+} from '../types/fluxelle';
+
+export function listConversations() {
+  return request<{ conversations: ConversationSummary[] }>('/fluxelle/conversations');
+}
+
+export function getConversation(id: string) {
+  return request<ConversationDetail>(`/fluxelle/conversations/${encodeURIComponent(id)}`);
+}
+
+export function createConversation(body: {
+  title:        string;
+  workflowId?:  string;
+  workflowName?: string;
+  messages?:    PersistedMessage[];
+}) {
+  return request<ConversationDetail>('/fluxelle/conversations', {
+    method: 'POST',
+    body:   JSON.stringify(body),
+  });
+}
+
+export function updateConversation(
+  id: string,
+  body: { messages: PersistedMessage[]; title?: string },
+) {
+  return request<ConversationDetail>(`/fluxelle/conversations/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body:   JSON.stringify(body),
+  });
+}
+
+export function deleteConversation(id: string) {
+  return request<{ deleted: boolean }>(`/fluxelle/conversations/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}

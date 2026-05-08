@@ -52,6 +52,7 @@ import { fileRoutes } from './routes/fileRoutes';
 import { fluxelleRoutes } from './routes/fluxelleRoutes';
 import { FluxelleService } from './services/FluxelleService';
 import { SkillRegistry } from './skills/SkillRegistry';
+import { FluxelleConversationRepository } from './repositories/FluxelleConversationRepository';
 import { UserAuthService } from './services/UserAuthService';
 import { EmailNotificationService } from './services/EmailNotificationService';
 import { NotificationSettingsRepository } from './repositories/NotificationSettingsRepository';
@@ -222,9 +223,10 @@ async function bootstrap() {
     await fastify.register(fileRoutes,   { prefix: '/api' });
 
     // Fluxelle — in-canvas AI workflow assistant
-    const skillRegistry  = new SkillRegistry();
-    const fluxelleService = new FluxelleService(skillRegistry);
-    await fastify.register(fluxelleRoutes, { prefix: '/api', fluxelle: fluxelleService, skills: skillRegistry });
+    const skillRegistry    = new SkillRegistry();
+    const fluxelleService  = new FluxelleService(skillRegistry);
+    const conversationRepo = new FluxelleConversationRepository();
+    await fastify.register(fluxelleRoutes, { prefix: '/api', fluxelle: fluxelleService, skills: skillRegistry, conversations: conversationRepo });
     // Auth & admin (no prefix-level auth guard — each route manages its own)
     await fastify.register(authRoutes,  { prefix: '/api', userAuth });
     await fastify.register(adminRoutes,      { prefix: '/api' });
