@@ -17,13 +17,17 @@ import {
   Link2,
   Check,
   X,
-  RotateCcw,
+  SquarePen,
   Lightbulb,
   History,
   ArrowLeft,
   MessageSquare,
   Clock,
   HelpCircle,
+  CheckCircle2,
+  ChevronRight,
+  ArrowRight,
+  Zap,
 } from 'lucide-react';
 import { useWorkflowStore } from '../../store/workflowStore';
 import { useSaveWorkflow } from '../../hooks/useSaveWorkflow';
@@ -152,6 +156,8 @@ export function FluxellePanel() {
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const scrollRef    = useRef<HTMLDivElement>(null);
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
+  /** Guard to only auto-load the last conversation once on mount. */
+  const hasAutoLoadedRef = useRef(false);
   /** While a create-conversation request is in flight we have no conv id yet,
    *  so apply / decline saves must wait for it to resolve. We park the in-flight
    *  promise here and chain follow-up updates onto it. */
@@ -163,6 +169,16 @@ export function FluxellePanel() {
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [messages, chat.isPending]);
+
+  // Auto-restore last conversation when panel first opens
+  useEffect(() => {
+    if (hasAutoLoadedRef.current) return;
+    if (!convList.data || convList.data.length === 0) return;
+    if (messages.length > 0 || activeConvId) return;
+    hasAutoLoadedRef.current = true;
+    void loadConversation(convList.data[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convList.data]);
 
   // ── Workflow snapshot ────────────────────────────────────────────────────────
   const snapshot = useMemo<WorkflowSnapshot | null>(() => {
@@ -194,12 +210,6 @@ export function FluxellePanel() {
 
   // ── Persistence helper ───────────────────────────────────────────────────────
 
-  /**
-   * Save the given message list to the conversation.
-   *  - If a conversation already exists, PATCH it.
-   *  - If a create is in flight, wait for it to resolve, then PATCH.
-   *  - Otherwise this is a no-op (caller must ensure a create has been started).
-   */
   async function persistMessages(updatedMessages: FluxelleMessage[]) {
     const persisted = toPersistedMessages(updatedMessages);
 
@@ -209,7 +219,7 @@ export function FluxellePanel() {
         const conv = await createConvPromiseRef.current;
         convId = conv.conversationId;
       } catch {
-        return; // create failed, nothing to update
+        return;
       }
     }
     if (!convId) return;
@@ -218,17 +228,10 @@ export function FluxellePanel() {
   }
 
   // ── Send a message ───────────────────────────────────────────────────────────
-  /**
-   * Append a user turn (free-text OR a structured question reply) and call the
-   * chat endpoint. Pass `extras` when the user reply is the answer to a previous
-   * question — we use it to mark that prior assistant message as answered.
-   */
   async function send(
     content: string,
     extras?: {
-      /** Id of the assistant message whose `question` is being answered. */
       answersMessageId?: string;
-      /** The structured answer (selected option ids + optional free text). */
       answer?: QuestionAnswer;
     },
   ) {
@@ -242,8 +245,6 @@ export function FluxellePanel() {
       createdAt: new Date().toISOString(),
     };
 
-    // If the user is answering a previous question, stamp the answer on that
-    // assistant message so the QuestionCard renders as resolved.
     const baseMessages = extras?.answersMessageId && extras.answer
       ? messages.map((m) =>
           m.id === extras.answersMessageId
@@ -272,11 +273,8 @@ export function FluxellePanel() {
       const allMessages = [...nextMessages, assistantMsg];
       setMessages(allMessages);
 
-      // ── Auto-save ────────────────────────────────────────────────────────────
       const persisted = toPersistedMessages(allMessages);
       if (!activeConvId && !createConvPromiseRef.current) {
-        // First turn — create a new conversation record. Park the promise so
-        // any apply/decline that happens before it resolves can chain a PATCH.
         const title = titleFromMessage(text);
         const promise = createConv.mutateAsync({
           title,
@@ -304,11 +302,6 @@ export function FluxellePanel() {
     }
   }
 
-  /**
-   * Called by the QuestionCard once the user picks one or more options.
-   * Builds a friendly text representation, marks the assistant message as
-   * answered, then sends the next chat turn so Fluxelle can continue.
-   */
   function handleAnswerQuestion(
     messageId: string,
     question: FluxelleQuestion,
@@ -330,26 +323,17 @@ export function FluxellePanel() {
     }
   }
 
-  /** Mark a message's proposal as applied AND apply it to the canvas. */
   function handleApply(messageId: string, proposal: WorkflowProposal) {
-    // 1. Mutate the canvas store (sets isDirty, bumps proposalVersion so the
-    //    NodeConfigPanel re-syncs its draft for any selected node that was affected).
     applyProposal(proposal);
 
-    // 2. Mark the proposal as applied in the conversation history.
     const updated = messages.map((m) =>
       m.id === messageId ? { ...m, proposalStatus: 'applied' as const } : m,
     );
     setMessages(updated);
     void persistMessages(updated);
-
-    // 3. Auto-save the workflow so the changes are persisted immediately.
-    //    We fire-and-forget — save errors are surfaced by the global error handler
-    //    and the user can always Ctrl+S to retry.
     void saveWorkflow();
   }
 
-  /** Mark a message's proposal as declined — no canvas changes are made. */
   function handleDecline(messageId: string) {
     const updated = messages.map((m) =>
       m.id === messageId ? { ...m, proposalStatus: 'declined' as const } : m,
@@ -378,7 +362,6 @@ export function FluxellePanel() {
     setIsLoadingConv(true);
     try {
       const detail = await api.getConversation(conv.conversationId);
-      // Drop the result if the user already moved on to another conversation.
       if (loadingConvIdRef.current !== conv.conversationId) return;
       setMessages(fromPersistedMessages(detail.messages));
     } catch (err) {
@@ -499,6 +482,8 @@ export function FluxellePanel() {
   }
 
   // ── Chat view ────────────────────────────────────────────────────────────────
+  const activeTitle = convList.data?.find((c) => c.conversationId === activeConvId)?.title;
+
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
@@ -508,13 +493,11 @@ export function FluxellePanel() {
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-[12.5px] font-semibold text-gray-900 dark:text-white leading-tight">Fluxelle</div>
-          <div className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight">
-            {activeConvId
-              ? (convList.data?.find((c) => c.conversationId === activeConvId)?.title ?? 'Conversation')
-              : 'Your in-canvas workflow assistant'}
+          <div className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight truncate">
+            {activeTitle ?? 'Your in-canvas workflow assistant'}
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           {messages.length > 0 && (
             <button
               type="button"
@@ -522,7 +505,7 @@ export function FluxellePanel() {
               title="New conversation"
               className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <SquarePen className="w-3.5 h-3.5" />
             </button>
           )}
           <button
@@ -557,15 +540,7 @@ export function FluxellePanel() {
           />
         ))}
 
-        {chat.isPending && (
-          <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0">
-              <Sparkles className="w-3 h-3 text-white" />
-            </div>
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            <span>Thinking…</span>
-          </div>
-        )}
+        {chat.isPending && <ThinkingIndicator />}
       </div>
 
       {/* Composer */}
@@ -573,7 +548,7 @@ export function FluxellePanel() {
         onSubmit={handleSubmit}
         className="border-t border-black/[0.07] dark:border-white/10 p-2.5 shrink-0"
       >
-        <div className="relative bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-colors">
+        <div className="relative bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-400/20 dark:focus-within:border-violet-500 transition-all shadow-sm">
           <textarea
             ref={textareaRef}
             value={input}
@@ -582,12 +557,12 @@ export function FluxellePanel() {
             placeholder="Describe a workflow, or ask Fluxelle to edit this one…"
             rows={2}
             disabled={chat.isPending}
-            className="w-full resize-none bg-transparent text-xs text-gray-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 px-2.5 py-2 pr-9 focus:outline-none rounded-lg disabled:opacity-50"
+            className="w-full resize-none bg-transparent text-xs text-gray-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 px-3 py-2.5 pr-10 focus:outline-none rounded-xl disabled:opacity-50"
           />
           <button
             type="submit"
             disabled={!input.trim() || chat.isPending}
-            className="absolute right-1.5 bottom-1.5 p-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="absolute right-2 bottom-2 w-7 h-7 rounded-lg bg-gradient-to-br from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm flex items-center justify-center"
             title="Send (Enter)"
           >
             <Send className="w-3.5 h-3.5" />
@@ -597,6 +572,23 @@ export function FluxellePanel() {
           Fluxelle never edits the canvas without your approval.
         </p>
       </form>
+    </div>
+  );
+}
+
+// ── Thinking indicator ────────────────────────────────────────────────────────
+
+function ThinkingIndicator() {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0">
+        <Sparkles className="w-3 h-3 text-white" />
+      </div>
+      <div className="flex items-center gap-1 px-3 py-2 rounded-2xl rounded-bl-md bg-slate-100 dark:bg-slate-800">
+        <span className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-slate-500 animate-bounce [animation-delay:-0.3s]" />
+        <span className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-slate-500 animate-bounce [animation-delay:-0.15s]" />
+        <span className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-slate-500 animate-bounce" />
+      </div>
     </div>
   );
 }
@@ -616,26 +608,28 @@ function ConversationRow({
 }) {
   return (
     <div
-      className={`group flex items-start gap-2 px-3 py-2.5 cursor-pointer transition-colors ${
+      className={`group flex items-start gap-2.5 px-3 py-2.5 cursor-pointer transition-colors ${
         isActive
-          ? 'bg-violet-50 dark:bg-violet-950/30'
-          : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]'
+          ? 'bg-violet-50 dark:bg-violet-950/30 border-l-2 border-violet-500'
+          : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04] border-l-2 border-transparent'
       }`}
       onClick={onOpen}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onOpen()}
     >
-      <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0 mt-0.5">
-        <Sparkles className="w-3 h-3 text-white" />
+      <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+        <Sparkles className="w-3.5 h-3.5 text-white" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-[11.5px] font-medium text-gray-900 dark:text-slate-200 truncate leading-snug">
+        <div className={`text-[11.5px] font-semibold truncate leading-snug ${
+          isActive ? 'text-violet-700 dark:text-violet-300' : 'text-gray-900 dark:text-slate-200'
+        }`}>
           {conv.title}
         </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
+        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
           {conv.workflowName && (
-            <span className="text-[9.5px] px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium truncate max-w-[80px]">
+            <span className="text-[9.5px] px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold truncate max-w-[90px]">
               {conv.workflowName}
             </span>
           )}
@@ -651,7 +645,7 @@ function ConversationRow({
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all shrink-0 mt-0.5"
+        className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-slate-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all shrink-0 mt-0.5"
         title="Delete conversation"
       >
         <Trash2 className="w-3 h-3" />
@@ -665,20 +659,25 @@ function ConversationRow({
 function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
   return (
     <div className="space-y-3 pt-2">
-      <div className="text-center py-3">
-        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center mx-auto shadow-md mb-3">
-          <Sparkles className="w-5 h-5 text-white" />
+      <div className="text-center py-4">
+        <div className="relative w-14 h-14 mx-auto mb-3">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/30">
+            <Sparkles className="w-6 h-6 text-white" />
+          </div>
+          <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-400 border-2 border-white dark:border-slate-900 flex items-center justify-center">
+            <Zap className="w-2 h-2 text-white" />
+          </div>
         </div>
-        <h3 className="text-[13px] font-semibold text-gray-900 dark:text-white">
+        <h3 className="text-[13px] font-bold text-gray-900 dark:text-white">
           Hi, I'm Fluxelle.
         </h3>
-        <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed px-2 mt-1">
+        <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed px-3 mt-1">
           Tell me what you want to automate, and I'll wire up the nodes for you.
         </p>
       </div>
 
       <div className="space-y-1.5">
-        <div className="flex items-center gap-1.5 px-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+        <div className="flex items-center gap-1.5 px-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
           <Lightbulb className="w-3 h-3" />
           Try one of these
         </div>
@@ -687,9 +686,10 @@ function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
             key={p}
             type="button"
             onClick={() => onPick(p)}
-            className="w-full text-left text-[11px] leading-snug px-2.5 py-2 rounded-lg bg-black/[0.03] dark:bg-white/[0.04] hover:bg-blue-50 dark:hover:bg-blue-900/30 border border-transparent hover:border-blue-300 dark:hover:border-blue-700 text-slate-700 dark:text-slate-300 transition-colors"
+            className="group w-full text-left text-[11px] leading-snug px-3 py-2.5 rounded-xl bg-black/[0.03] dark:bg-white/[0.04] hover:bg-gradient-to-r hover:from-violet-50 hover:to-fuchsia-50 dark:hover:from-violet-900/20 dark:hover:to-fuchsia-900/20 border border-transparent hover:border-violet-200 dark:hover:border-violet-800/50 text-slate-700 dark:text-slate-300 transition-all flex items-start gap-2"
           >
-            {p}
+            <ChevronRight className="w-3 h-3 shrink-0 mt-0.5 text-slate-300 dark:text-slate-600 group-hover:text-violet-500 transition-colors" />
+            <span>{p}</span>
           </button>
         ))}
       </div>
@@ -713,7 +713,7 @@ function MessageBubble({
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] text-[11.5px] leading-snug bg-blue-600 text-white px-2.5 py-1.5 rounded-2xl rounded-br-md whitespace-pre-wrap">
+        <div className="max-w-[85%] text-[11.5px] leading-relaxed bg-gradient-to-br from-blue-600 to-blue-700 text-white px-3.5 py-2.5 rounded-2xl rounded-br-sm whitespace-pre-wrap shadow-sm shadow-blue-500/20">
           {message.content}
         </div>
       </div>
@@ -722,12 +722,12 @@ function MessageBubble({
 
   return (
     <div className="flex gap-2">
-      <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0 mt-0.5">
+      <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0 mt-0.5 shadow-sm shadow-violet-500/20">
         <Sparkles className="w-3 h-3 text-white" />
       </div>
-      <div className="flex-1 min-w-0 space-y-2">
+      <div className="flex-1 min-w-0 space-y-2.5">
         {message.content && (
-          <div className="text-[11.5px] leading-snug text-gray-900 dark:text-slate-200 whitespace-pre-wrap">
+          <div className="text-[11.5px] leading-relaxed text-gray-800 dark:text-slate-200 whitespace-pre-wrap">
             {message.content}
           </div>
         )}
@@ -751,7 +751,7 @@ function MessageBubble({
   );
 }
 
-// ── Question card (Claude-style selectable options) ──────────────────────────
+// ── Question card ─────────────────────────────────────────────────────────────
 
 function QuestionCard({
   question,
@@ -767,20 +767,12 @@ function QuestionCard({
   const isAnswered = !!answer;
   const isMulti    = !!question.allowMultiple;
 
-  function pickedLabels(): string[] {
-    if (!answer) return [];
-    return answer.selectedOptionIds
-      .map((id) => question.options.find((o) => o.id === id)?.label ?? id)
-      .filter(Boolean);
-  }
-
   function toggle(id: string) {
     if (isAnswered) return;
     if (isMulti) {
       setPicked((prev) => prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]);
       return;
     }
-    // Single-select: clicking an option commits the answer immediately.
     onAnswer({
       selectedOptionIds: [id],
       ...(freeText.trim() ? { freeText: freeText.trim() } : {}),
@@ -796,98 +788,134 @@ function QuestionCard({
     });
   }
 
+  const selectedLabels = isAnswered
+    ? answer!.selectedOptionIds
+        .map((id) => question.options.find((o) => o.id === id)?.label ?? id)
+        .filter(Boolean)
+    : [];
+
   return (
-    <div className="border border-blue-300/60 dark:border-blue-700/40 bg-blue-50/40 dark:bg-blue-950/20 rounded-lg overflow-hidden">
-      <div className="px-2.5 py-1.5 border-b border-blue-200/60 dark:border-blue-800/40 bg-blue-100/40 dark:bg-blue-900/20 flex items-center gap-1.5">
-        <HelpCircle className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-700 dark:text-blue-300">
-          Fluxelle needs your input
+    <div className="rounded-xl overflow-hidden border border-sky-200/80 dark:border-sky-800/50 shadow-sm shadow-sky-500/5">
+      {/* Header */}
+      <div className="px-3.5 py-2.5 bg-gradient-to-r from-sky-500/10 via-blue-500/8 to-violet-500/8 dark:from-sky-900/40 dark:via-blue-900/30 dark:to-violet-900/20 border-b border-sky-200/70 dark:border-sky-800/50 flex items-center gap-2">
+        <div className="w-5 h-5 rounded-full bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center shrink-0 shadow-sm">
+          <HelpCircle className="w-3 h-3 text-white" />
+        </div>
+        <span className="text-[11px] font-bold text-sky-700 dark:text-sky-300 flex-1">
+          {isAnswered ? 'Question answered' : 'Fluxelle needs your input'}
         </span>
+        {isAnswered && (
+          <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded-full">
+            <CheckCircle2 className="w-3 h-3" />
+            Done
+          </div>
+        )}
       </div>
 
-      <div className="p-2.5 space-y-2">
-        <div className="text-[11.5px] leading-snug font-medium text-gray-900 dark:text-slate-100">
+      {/* Body */}
+      <div className="bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm p-3.5 space-y-3">
+        <div className="text-[12px] font-semibold text-gray-900 dark:text-white leading-snug">
           {question.prompt}
         </div>
         {question.helperText && (
-          <div className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-snug">
+          <div className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-relaxed">
             {question.helperText}
           </div>
         )}
 
-        <div className="space-y-1">
-          {question.options.map((opt) => {
-            const isPicked = isAnswered
-              ? answer!.selectedOptionIds.includes(opt.id)
-              : picked.includes(opt.id);
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                disabled={isAnswered}
-                onClick={() => toggle(opt.id)}
-                className={`w-full text-left px-2.5 py-1.5 rounded-md border transition-colors flex items-start gap-2 ${
-                  isPicked
-                    ? 'border-blue-400 dark:border-blue-500 bg-blue-100/70 dark:bg-blue-900/40'
-                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-blue-300 dark:hover:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40'
-                } ${isAnswered ? 'cursor-default opacity-90' : 'cursor-pointer'}`}
+        {isAnswered ? (
+          <div className="space-y-1.5">
+            {selectedLabels.map((label, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200/60 dark:border-emerald-800/40"
               >
-                {isMulti && (
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 dark:text-emerald-400 shrink-0" />
+                <span className="text-[11.5px] font-semibold text-gray-900 dark:text-slate-200">{label}</span>
+              </div>
+            ))}
+            {answer?.freeText && (
+              <div className="px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 text-[11px] text-slate-600 dark:text-slate-300 italic">
+                "{answer.freeText}"
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {question.options.map((opt) => {
+              const isPicked = picked.includes(opt.id);
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => toggle(opt.id)}
+                  className={`group w-full text-left flex items-start gap-3 px-3 py-2.5 rounded-xl border-2 transition-all duration-150 ${
+                    isPicked
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 shadow-[0_0_0_3px_rgba(59,130,246,0.12)]'
+                      : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/60 hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50/60 dark:hover:bg-blue-950/30 hover:shadow-sm'
+                  }`}
+                >
                   <span
-                    className={`mt-0.5 w-3 h-3 rounded border flex items-center justify-center shrink-0 ${
+                    className={`mt-0.5 w-4 h-4 ${isMulti ? 'rounded-md' : 'rounded-full'} border-2 flex items-center justify-center shrink-0 transition-all duration-150 ${
                       isPicked
-                        ? 'border-blue-500 bg-blue-500'
-                        : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800'
+                        ? 'border-blue-500 bg-blue-500 shadow-sm shadow-blue-500/30'
+                        : 'border-slate-300 dark:border-slate-600 group-hover:border-blue-400'
                     }`}
                   >
-                    {isPicked && <Check className="w-2.5 h-2.5 text-white" />}
+                    {isPicked && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
                   </span>
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="text-[11.5px] font-medium text-gray-900 dark:text-slate-200 leading-snug">
-                    {opt.label}
-                  </div>
-                  {opt.description && (
-                    <div className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-snug mt-0.5 truncate">
-                      {opt.description}
+                  <div className="min-w-0 flex-1">
+                    <div className={`text-[12px] font-semibold leading-snug transition-colors ${
+                      isPicked ? 'text-blue-700 dark:text-blue-300' : 'text-gray-900 dark:text-slate-200'
+                    }`}>
+                      {opt.label}
                     </div>
+                    {opt.description && (
+                      <div className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-snug mt-0.5">
+                        {opt.description}
+                      </div>
+                    )}
+                  </div>
+                  {!isMulti && (
+                    <ChevronRight className={`w-3.5 h-3.5 shrink-0 mt-0.5 transition-all duration-150 ${
+                      isPicked
+                        ? 'text-blue-500 translate-x-0.5'
+                        : 'text-slate-300 dark:text-slate-600 group-hover:text-blue-400 group-hover:translate-x-0.5'
+                    }`} />
                   )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+                </button>
+              );
+            })}
 
-        {question.allowFreeText && !isAnswered && (
-          <input
-            type="text"
-            value={freeText}
-            onChange={(e) => setFreeText(e.target.value)}
-            placeholder="Or type a custom answer…"
-            className="w-full text-[11px] px-2 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-          />
+            {question.allowFreeText && (
+              <input
+                type="text"
+                value={freeText}
+                onChange={(e) => setFreeText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && freeText.trim() && confirm()}
+                placeholder="Or type a custom answer…"
+                className="w-full text-[11.5px] px-3 py-2.5 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600/80 bg-white dark:bg-slate-800/60 text-gray-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-solid focus:border-blue-400 dark:focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 transition-all"
+              />
+            )}
+          </div>
         )}
       </div>
 
+      {/* Footer — multi/free-text confirm button */}
       {!isAnswered && (isMulti || question.allowFreeText) && (
-        <div className="px-2.5 py-1.5 border-t border-blue-200/60 dark:border-blue-800/40 bg-white/30 dark:bg-black/10 flex items-center justify-end">
+        <div className="px-3.5 py-2.5 border-t border-sky-200/70 dark:border-sky-800/50 bg-white/40 dark:bg-black/10 flex items-center justify-between">
+          <span className="text-[10px] text-slate-400 dark:text-slate-500">
+            {isMulti ? `${picked.length} selected` : ''}
+          </span>
           <button
             type="button"
             onClick={confirm}
             disabled={picked.length === 0 && !freeText.trim()}
-            className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold px-4 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 active:from-blue-700 active:to-blue-800 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm shadow-blue-500/20"
           >
-            <Check className="w-3 h-3" />
-            Send answer
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            Confirm selection
           </button>
-        </div>
-      )}
-
-      {isAnswered && (
-        <div className="px-2.5 py-1.5 border-t border-blue-200/60 dark:border-blue-800/40 bg-white/30 dark:bg-black/10 flex items-center gap-1 text-[10.5px] font-semibold text-emerald-600 dark:text-emerald-400">
-          <Check className="w-3 h-3" />
-          You answered: {pickedLabels().join(', ') || '—'}
-          {answer?.freeText && <span className="text-slate-500 dark:text-slate-400 font-normal">— "{answer.freeText}"</span>}
         </div>
       )}
     </div>
@@ -915,66 +943,75 @@ function ProposalCard({
   const totalChanges = adds.length + updates.length + deletes.length;
 
   return (
-    <div className="border border-violet-300/60 dark:border-violet-700/40 bg-violet-50/40 dark:bg-violet-950/20 rounded-lg overflow-hidden">
-      <div className="px-2.5 py-1.5 border-b border-violet-200/60 dark:border-violet-800/40 bg-violet-100/40 dark:bg-violet-900/20 flex items-center gap-1.5">
-        <Sparkles className="w-3 h-3 text-violet-600 dark:text-violet-400" />
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-300">
-          Proposed changes · {totalChanges} {totalChanges === 1 ? 'edit' : 'edits'}
+    <div className="rounded-xl overflow-hidden border border-violet-300/70 dark:border-violet-700/40 shadow-sm shadow-violet-500/5">
+      {/* Header */}
+      <div className="px-3.5 py-2.5 bg-gradient-to-r from-violet-500/15 via-purple-500/10 to-fuchsia-500/10 dark:from-violet-900/50 dark:via-purple-900/30 dark:to-fuchsia-900/20 border-b border-violet-200/70 dark:border-violet-800/50 flex items-center gap-2">
+        <div className="w-5 h-5 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0 shadow-sm">
+          <Sparkles className="w-3 h-3 text-white" />
+        </div>
+        <span className="text-[11px] font-bold text-violet-700 dark:text-violet-300 flex-1">
+          Proposed changes
+        </span>
+        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-200/70 dark:bg-violet-800/70 text-violet-700 dark:text-violet-300">
+          {totalChanges} {totalChanges === 1 ? 'edit' : 'edits'}
         </span>
       </div>
 
-      <div className="p-2.5 space-y-1.5">
+      {/* Change items */}
+      <div className="bg-white/70 dark:bg-slate-900/70 p-3 space-y-1.5">
         {adds.map((n) => (
-          <div key={`add-${n.id}`} className="flex items-start gap-2 text-[11px]">
-            <Plus className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <NodeIcon type={n.type} size={11} />
-                <span className="font-medium text-gray-900 dark:text-slate-200 truncate">
-                  {n.name}
-                </span>
-                <span className="text-[9.5px] text-slate-500 dark:text-slate-400 font-mono">
-                  {n.id}
-                </span>
-              </div>
+          <div key={`add-${n.id}`} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/70 dark:border-emerald-900/50">
+            <div className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+              <Plus className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" strokeWidth={3} />
             </div>
+            <span className="text-[9px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-400 shrink-0 w-8">Add</span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <NodeIcon type={n.type} size={12} />
+              <span className="text-[9.5px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">{n.type}</span>
+            </div>
+            <span className="text-[11.5px] font-semibold text-gray-900 dark:text-slate-200 truncate flex-1 min-w-0">
+              {n.name}
+            </span>
+            <span className="text-[9px] text-slate-400 dark:text-slate-500 font-mono shrink-0">{n.id}</span>
           </div>
         ))}
 
         {updates.map((u) => (
-          <div key={`upd-${u.id}`} className="flex items-start gap-2 text-[11px]">
-            <Pencil className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-            <div className="min-w-0 flex-1">
-              <span className="font-medium text-gray-900 dark:text-slate-200">
-                {u.name ?? `Update ${u.id}`}
-              </span>
-              <span className="ml-1.5 text-[9.5px] text-slate-500 dark:text-slate-400 font-mono">
-                {u.id}
-              </span>
+          <div key={`upd-${u.id}`} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200/70 dark:border-amber-900/50">
+            <div className="w-4 h-4 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
+              <Pencil className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400" />
             </div>
+            <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-400 shrink-0 w-8">Edit</span>
+            <span className="text-[11.5px] font-semibold text-gray-900 dark:text-slate-200 truncate flex-1 min-w-0">
+              {u.name ?? u.id}
+            </span>
+            <span className="text-[9px] text-slate-400 dark:text-slate-500 font-mono shrink-0">{u.id}</span>
           </div>
         ))}
 
         {deletes.map((id) => (
-          <div key={`del-${id}`} className="flex items-start gap-2 text-[11px]">
-            <Trash2 className="w-3 h-3 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
-            <span className="font-mono text-[10.5px] text-slate-700 dark:text-slate-300">{id}</span>
+          <div key={`del-${id}`} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200/70 dark:border-red-900/50">
+            <div className="w-4 h-4 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
+              <Trash2 className="w-2.5 h-2.5 text-red-600 dark:text-red-400" />
+            </div>
+            <span className="text-[9px] font-black uppercase tracking-widest text-red-700 dark:text-red-400 shrink-0 w-8">Del</span>
+            <span className="text-[11.5px] font-mono text-gray-700 dark:text-slate-300 flex-1 truncate min-w-0">{id}</span>
           </div>
         ))}
 
         {edges.length > 0 && (
-          <div className="pt-1 mt-1 border-t border-violet-200/40 dark:border-violet-800/30">
-            <div className="text-[9.5px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+          <div className="pt-2 mt-1 border-t border-slate-200/60 dark:border-slate-700/40 space-y-1.5">
+            <div className="flex items-center gap-1 text-[9.5px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1">
+              <Link2 className="w-3 h-3" />
               Connections
             </div>
             {edges.map((e, i) => (
-              <div key={i} className="flex items-center gap-1 text-[10.5px] text-slate-600 dark:text-slate-300">
-                <Link2 className="w-2.5 h-2.5 text-violet-600 dark:text-violet-400" />
-                <span className="font-mono">{e.from}</span>
-                <span className="text-slate-400">→</span>
-                <span className="font-mono">{e.to}</span>
+              <div key={i} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-violet-50/60 dark:bg-violet-950/30 border border-violet-200/50 dark:border-violet-900/40">
+                <span className="text-[11px] font-mono font-semibold text-violet-700 dark:text-violet-400">{e.from}</span>
+                <ArrowRight className="w-3 h-3 text-slate-400 dark:text-slate-500 shrink-0" />
+                <span className="text-[11px] font-mono font-semibold text-violet-700 dark:text-violet-400">{e.to}</span>
                 {e.label && (
-                  <span className="ml-1 px-1 rounded bg-violet-200/50 dark:bg-violet-900/40 text-[9.5px] text-violet-700 dark:text-violet-300">
+                  <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded-full bg-violet-200/70 dark:bg-violet-800/60 text-violet-700 dark:text-violet-300 font-semibold">
                     {e.label}
                   </span>
                 )}
@@ -984,39 +1021,43 @@ function ProposalCard({
         )}
       </div>
 
-      <div className="px-2.5 py-1.5 border-t border-violet-200/60 dark:border-violet-800/40 bg-white/30 dark:bg-black/10 flex items-center justify-end gap-2">
+      {/* Actions */}
+      <div className="px-3 py-2.5 border-t border-violet-200/70 dark:border-violet-800/50 bg-white/40 dark:bg-black/15">
         {status === 'applied' && (
-          <div className="flex items-center gap-1 text-[10.5px] font-semibold text-emerald-600 dark:text-emerald-400">
-            <Check className="w-3 h-3" />
-            Applied
+          <div className="flex items-center justify-center gap-2 py-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+            <div className="w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+            </div>
+            Applied to canvas
           </div>
         )}
         {status === 'declined' && (
-          <div className="flex items-center gap-1 text-[10.5px] font-semibold text-slate-500 dark:text-slate-400">
-            <X className="w-3 h-3" />
-            Declined
+          <div className="flex items-center justify-center gap-2 py-1 text-[11px] font-bold text-slate-500 dark:text-slate-400">
+            <div className="w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+              <X className="w-3.5 h-3.5" />
+            </div>
+            Proposal declined
           </div>
         )}
         {!status && (
-          <>
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onDecline}
-              className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2.5 py-1 rounded-md text-slate-600 dark:text-slate-300 hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition-colors"
+              className="flex-1 text-[11px] font-semibold py-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 transition-all"
               title="Dismiss this proposal without changing the canvas"
             >
-              <X className="w-3 h-3" />
               Decline
             </button>
             <button
               type="button"
               onClick={onApply}
-              className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2.5 py-1 rounded-md bg-violet-600 hover:bg-violet-500 text-white transition-colors"
+              className="flex-[2] inline-flex items-center justify-center gap-2 text-[11px] font-bold py-2 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 active:from-violet-700 active:to-fuchsia-700 text-white shadow-sm shadow-violet-500/25 transition-all"
             >
-              <Check className="w-3 h-3" />
+              <Sparkles className="w-3.5 h-3.5" />
               Apply to canvas
             </button>
-          </>
+          </div>
         )}
       </div>
     </div>
