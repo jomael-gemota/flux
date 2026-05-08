@@ -41,10 +41,11 @@ const ChatRequestSchema = z.object({
 });
 
 const ConversationMessageSchema = z.object({
-    role:      z.enum(['user', 'assistant']),
-    content:   z.string(),
-    proposal:  z.record(z.string(), z.unknown()).nullable().optional(),
-    createdAt: z.string(),
+    role:           z.enum(['user', 'assistant']),
+    content:        z.string(),
+    proposal:       z.record(z.string(), z.unknown()).nullable().optional(),
+    proposalStatus: z.enum(['applied', 'declined']).nullable().optional(),
+    createdAt:      z.string(),
 });
 
 const CreateConversationSchema = z.object({

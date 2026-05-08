@@ -16,6 +16,7 @@ import {
   Trash2,
   Link2,
   Check,
+  X,
   RotateCcw,
   Lightbulb,
   History,
@@ -38,6 +39,7 @@ import type {
   WorkflowProposal,
   WorkflowSnapshot,
   ConversationSummary,
+  ConversationDetail,
   PersistedMessage,
 } from '../../types/fluxelle';
 import type { NodeType } from '../../types/workflow';
@@ -84,21 +86,23 @@ function titleFromMessage(content: string): string {
 /** Convert in-memory FluxelleMessage[] → PersistedMessage[] for the API. */
 function toPersistedMessages(msgs: FluxelleMessage[]): PersistedMessage[] {
   return msgs.map((m) => ({
-    role:      m.role,
-    content:   m.content,
-    proposal:  m.proposal ?? null,
-    createdAt: m.createdAt,
+    role:           m.role,
+    content:        m.content,
+    proposal:       m.proposal ?? null,
+    proposalStatus: m.proposalStatus ?? null,
+    createdAt:      m.createdAt,
   }));
 }
 
 /** Convert PersistedMessage[] back to in-memory FluxelleMessage[]. */
 function fromPersistedMessages(msgs: PersistedMessage[]): FluxelleMessage[] {
   return msgs.map((m) => ({
-    id:        randomId(),
-    role:      m.role,
-    content:   m.content,
-    proposal:  m.proposal ?? undefined,
-    createdAt: m.createdAt,
+    id:             randomId(),
+    role:           m.role,
+    content:        m.content,
+    proposal:       m.proposal ?? undefined,
+    proposalStatus: m.proposalStatus ?? undefined,
+    createdAt:      m.createdAt,
   }));
 }
 
@@ -123,11 +127,14 @@ export function FluxellePanel() {
   const [view, setView]         = useState<PanelView>('chat');
   const [messages, setMessages] = useState<FluxelleMessage[]>([]);
   const [input, setInput]       = useState('');
-  const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
   /** conversationId of the currently active (auto-saved) conversation. */
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const scrollRef    = useRef<HTMLDivElement>(null);
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
+  /** While a create-conversation request is in flight we have no conv id yet,
+   *  so apply / decline saves must wait for it to resolve. We park the in-flight
+   *  promise here and chain follow-up updates onto it. */
+  const createConvPromiseRef = useRef<Promise<ConversationDetail> | null>(null);
 
   // Auto-scroll
   useEffect(() => {
@@ -158,6 +165,36 @@ export function FluxellePanel() {
       })),
     };
   }, [nodes, edges, activeWf]);
+
+  /** Tracks the in-flight conversation load so a fast-switching user can't
+   *  have an older request overwrite a newer one's results. */
+  const loadingConvIdRef = useRef<string | null>(null);
+  const [isLoadingConv, setIsLoadingConv] = useState(false);
+
+  // ── Persistence helper ───────────────────────────────────────────────────────
+
+  /**
+   * Save the given message list to the conversation.
+   *  - If a conversation already exists, PATCH it.
+   *  - If a create is in flight, wait for it to resolve, then PATCH.
+   *  - Otherwise this is a no-op (caller must ensure a create has been started).
+   */
+  async function persistMessages(updatedMessages: FluxelleMessage[]) {
+    const persisted = toPersistedMessages(updatedMessages);
+
+    let convId = activeConvId;
+    if (!convId && createConvPromiseRef.current) {
+      try {
+        const conv = await createConvPromiseRef.current;
+        convId = conv.conversationId;
+      } catch {
+        return; // create failed, nothing to update
+      }
+    }
+    if (!convId) return;
+
+    updateConv.mutate({ id: convId, body: { messages: persisted } });
+  }
 
   // ── Send a message ───────────────────────────────────────────────────────────
   async function send(content: string) {
@@ -191,20 +228,22 @@ export function FluxellePanel() {
 
       // ── Auto-save ────────────────────────────────────────────────────────────
       const persisted = toPersistedMessages(allMessages);
-      if (!activeConvId) {
-        // First turn — create a new conversation record.
+      if (!activeConvId && !createConvPromiseRef.current) {
+        // First turn — create a new conversation record. Park the promise so
+        // any apply/decline that happens before it resolves can chain a PATCH.
         const title = titleFromMessage(text);
-        createConv.mutate(
-          {
-            title,
-            workflowId:   activeWf?.id,
-            workflowName: activeWf?.name,
-            messages:     persisted,
-          },
-          { onSuccess: (conv) => setActiveConvId(conv.conversationId) },
-        );
+        const promise = createConv.mutateAsync({
+          title,
+          workflowId:   activeWf?.id,
+          workflowName: activeWf?.name,
+          messages:     persisted,
+        });
+        createConvPromiseRef.current = promise;
+        promise
+          .then((conv) => { setActiveConvId(conv.conversationId); })
+          .finally(() => { createConvPromiseRef.current = null; });
       } else {
-        updateConv.mutate({ id: activeConvId, body: { messages: persisted } });
+        await persistMessages(allMessages);
       }
     } catch (err) {
       const errorMsg: FluxelleMessage = {
@@ -231,31 +270,40 @@ export function FluxellePanel() {
     }
   }
 
+  /** Mark a message's proposal as applied AND apply it to the canvas. */
   function handleApply(messageId: string, proposal: WorkflowProposal) {
     applyProposal(proposal);
-    setAppliedIds((prev) => new Set(prev).add(messageId));
+    const updated = messages.map((m) =>
+      m.id === messageId ? { ...m, proposalStatus: 'applied' as const } : m,
+    );
+    setMessages(updated);
+    void persistMessages(updated);
+  }
+
+  /** Mark a message's proposal as declined — no canvas changes are made. */
+  function handleDecline(messageId: string) {
+    const updated = messages.map((m) =>
+      m.id === messageId ? { ...m, proposalStatus: 'declined' as const } : m,
+    );
+    setMessages(updated);
+    void persistMessages(updated);
   }
 
   function startNewConversation() {
     loadingConvIdRef.current = null;
+    createConvPromiseRef.current = null;
     setIsLoadingConv(false);
     setMessages([]);
-    setAppliedIds(new Set());
     setActiveConvId(null);
     setView('chat');
     setTimeout(() => textareaRef.current?.focus(), 50);
   }
 
-  /** Tracks the in-flight conversation load so a fast-switching user can't
-   *  have an older request overwrite a newer one's results. */
-  const loadingConvIdRef = useRef<string | null>(null);
-  const [isLoadingConv, setIsLoadingConv] = useState(false);
-
   async function loadConversation(conv: ConversationSummary) {
     setView('chat');
     setActiveConvId(conv.conversationId);
-    setAppliedIds(new Set());
     setMessages([]);
+    createConvPromiseRef.current = null;
 
     loadingConvIdRef.current = conv.conversationId;
     setIsLoadingConv(true);
@@ -434,8 +482,8 @@ export function FluxellePanel() {
           <MessageBubble
             key={m.id}
             message={m}
-            applied={appliedIds.has(m.id)}
             onApply={(p) => handleApply(m.id, p)}
+            onDecline={() => handleDecline(m.id)}
           />
         ))}
 
@@ -583,12 +631,12 @@ function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
 
 function MessageBubble({
   message,
-  applied,
   onApply,
+  onDecline,
 }: {
-  message: FluxelleMessage;
-  applied: boolean;
-  onApply: (proposal: WorkflowProposal) => void;
+  message:   FluxelleMessage;
+  onApply:   (proposal: WorkflowProposal) => void;
+  onDecline: () => void;
 }) {
   if (message.role === 'user') {
     return (
@@ -614,8 +662,9 @@ function MessageBubble({
         {message.proposal && (
           <ProposalCard
             proposal={message.proposal}
-            applied={applied}
+            status={message.proposalStatus}
             onApply={() => onApply(message.proposal!)}
+            onDecline={onDecline}
           />
         )}
       </div>
@@ -627,12 +676,14 @@ function MessageBubble({
 
 function ProposalCard({
   proposal,
-  applied,
+  status,
   onApply,
+  onDecline,
 }: {
-  proposal: WorkflowProposal;
-  applied:  boolean;
-  onApply:  () => void;
+  proposal:  WorkflowProposal;
+  status?:   'applied' | 'declined';
+  onApply:   () => void;
+  onDecline: () => void;
 }) {
   const adds    = proposal.adds    ?? [];
   const updates = proposal.updates ?? [];
@@ -711,21 +762,39 @@ function ProposalCard({
         )}
       </div>
 
-      <div className="px-2.5 py-1.5 border-t border-violet-200/60 dark:border-violet-800/40 bg-white/30 dark:bg-black/10 flex items-center justify-end">
-        {applied ? (
+      <div className="px-2.5 py-1.5 border-t border-violet-200/60 dark:border-violet-800/40 bg-white/30 dark:bg-black/10 flex items-center justify-end gap-2">
+        {status === 'applied' && (
           <div className="flex items-center gap-1 text-[10.5px] font-semibold text-emerald-600 dark:text-emerald-400">
             <Check className="w-3 h-3" />
             Applied
           </div>
-        ) : (
-          <button
-            type="button"
-            onClick={onApply}
-            className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2.5 py-1 rounded-md bg-violet-600 hover:bg-violet-500 text-white transition-colors"
-          >
-            <Check className="w-3 h-3" />
-            Apply to canvas
-          </button>
+        )}
+        {status === 'declined' && (
+          <div className="flex items-center gap-1 text-[10.5px] font-semibold text-slate-500 dark:text-slate-400">
+            <X className="w-3 h-3" />
+            Declined
+          </div>
+        )}
+        {!status && (
+          <>
+            <button
+              type="button"
+              onClick={onDecline}
+              className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2.5 py-1 rounded-md text-slate-600 dark:text-slate-300 hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition-colors"
+              title="Dismiss this proposal without changing the canvas"
+            >
+              <X className="w-3 h-3" />
+              Decline
+            </button>
+            <button
+              type="button"
+              onClick={onApply}
+              className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2.5 py-1 rounded-md bg-violet-600 hover:bg-violet-500 text-white transition-colors"
+            >
+              <Check className="w-3 h-3" />
+              Apply to canvas
+            </button>
+          </>
         )}
       </div>
     </div>

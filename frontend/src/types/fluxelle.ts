@@ -1,5 +1,8 @@
 import type { NodeType } from './workflow';
 
+/** Tracks whether the user has acted on a proposal attached to a message. */
+export type ProposalStatus = 'applied' | 'declined';
+
 export interface FluxelleMessage {
   /** Stable id for keying the React list. */
   id: string;
@@ -7,6 +10,8 @@ export interface FluxelleMessage {
   content: string;
   /** Optional proposal attached to an assistant turn. */
   proposal?: WorkflowProposal;
+  /** User's decision on the attached proposal — undefined while still pending. */
+  proposalStatus?: ProposalStatus;
   /** ISO timestamp; rendered as the message timestamp. */
   createdAt: string;
 }
@@ -81,10 +86,11 @@ export interface SkillDetail extends SkillSummary {
 
 /** A single persisted message inside a saved conversation. */
 export interface PersistedMessage {
-  role:      'user' | 'assistant';
-  content:   string;
-  proposal?: WorkflowProposal | null;
-  createdAt: string;
+  role:           'user' | 'assistant';
+  content:        string;
+  proposal?:      WorkflowProposal | null;
+  proposalStatus?: ProposalStatus | null;
+  createdAt:      string;
 }
 
 /** Summary row used in the history list. */
