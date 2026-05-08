@@ -97,8 +97,17 @@ export async function fluxelleRoutes(
                 );
             }
 
-            const response = await fluxelle.chat(body);
-            return reply.code(200).send(response);
+            try {
+                const response = await fluxelle.chat(body);
+                return reply.code(200).send(response);
+            } catch (err) {
+                // Surface the underlying provider error (model not found,
+                // unsupported parameter, rate limit, …) rather than letting
+                // it fall through to the generic 500 handler.
+                const message = err instanceof Error ? err.message : 'Unknown error';
+                request.log.error({ err }, '[Fluxelle] chat error');
+                throw BadRequestError(`Fluxelle could not respond: ${message}`);
+            }
         },
     );
 

@@ -89,6 +89,11 @@ export interface FluxelleChatResponse {
 const DEFAULT_MODEL = process.env.FLUXELLE_MODEL ?? 'gpt-5.5';
 const MAX_TOOL_HOPS = 6;
 
+/** GPT-5.x and o-series reasoning models don't accept custom temperature
+ *  (or other sampling params) — they only run at the model's default.
+ *  Mirrors the detection used in `src/llm/providers/OpenAIProvider.ts`. */
+const REASONING_MODEL_RE = /^(gpt-5|o\d)/i;
+
 export class FluxelleService {
     private client: OpenAI | null;
 
@@ -113,10 +118,14 @@ export class FluxelleService {
         const skillsUsed: string[] = [];
         let proposal: WorkflowProposal | undefined;
 
+        const isReasoningModel = REASONING_MODEL_RE.test(DEFAULT_MODEL);
+
         for (let hop = 0; hop < MAX_TOOL_HOPS; hop++) {
             const completion = await this.client.chat.completions.create({
-                model:       DEFAULT_MODEL,
-                temperature: 0.3,
+                model: DEFAULT_MODEL,
+                // Reasoning models (gpt-5.x, o-series) only support the default
+                // temperature; passing 0.3 makes the API return a 400.
+                ...(isReasoningModel ? {} : { temperature: 0.3 }),
                 messages,
                 tools,
                 tool_choice: 'auto',
