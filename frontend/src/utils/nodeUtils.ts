@@ -1,5 +1,22 @@
 import type { CanvasNode } from '../store/workflowStore';
 
+/**
+ * Coerce a config value to a safe primitive for rendering as a React child.
+ *
+ * AI-proposed configs (Fluxelle, Claude) sometimes return objects or arrays where
+ * the UI widget expects a string. Rendering those directly throws React error #31
+ * ("Objects are not valid as a React child"). This helper is the single guard.
+ */
+export function safeText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+  if (Array.isArray(value)) return value.map(safeText).filter(Boolean).join(', ');
+  try { return JSON.stringify(value); } catch { return String(value); }
+}
+
 /** Recursively search any config value for {{nodes.<targetId>. expressions. */
 export function configReferencesNode(obj: unknown, targetId: string): boolean {
   if (typeof obj === 'string') {

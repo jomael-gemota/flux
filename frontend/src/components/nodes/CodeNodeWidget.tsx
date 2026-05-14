@@ -1,12 +1,13 @@
 import type { NodeProps, Node } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import type { CanvasNodeData } from '../../store/workflowStore';
+import { safeText } from '../../utils/nodeUtils';
 
 type CodeNode = Node<CanvasNodeData, 'workflowNode'>;
 
 export function CodeNodeWidget({ id, data, selected }: NodeProps<CodeNode>) {
-  const cfg = data.config as { code?: string };
-  const code = cfg.code ?? '';
+  const cfg = data.config as { code?: unknown };
+  const code = safeText(cfg.code);
   const lineCount = code ? code.split('\n').length : 0;
   return (
     <BaseNode

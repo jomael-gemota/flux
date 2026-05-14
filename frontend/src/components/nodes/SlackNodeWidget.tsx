@@ -1,6 +1,7 @@
 import type { NodeProps, Node } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import type { CanvasNodeData } from '../../store/workflowStore';
+import { safeText } from '../../utils/nodeUtils';
 
 type SlackNode = Node<CanvasNodeData, 'workflowNode'>;
 
@@ -14,46 +15,43 @@ const ACTION_LABELS: Record<string, string> = {
   list_channels: 'List Channels',
 };
 
-/** Safely coerce a config value that may be a string, string array, or anything else. */
-function coerceStr(v: unknown): string {
-  if (!v) return '';
-  if (Array.isArray(v)) return v.map(String).join(',');
-  return String(v);
-}
-
 export function SlackNodeWidget({ id, data, selected }: NodeProps<SlackNode>) {
   const cfg = data.config as {
-    action?: string;
+    action?: unknown;
     channel?: unknown;
     channels?: unknown;
     userId?: unknown;
     userIds?: unknown;
-    readSource?: string;
-    channelFilter?: string;
-    threadTs?: string;
+    readSource?: unknown;
+    channelFilter?: unknown;
+    threadTs?: unknown;
   };
 
-  const actionLabel = cfg.action ? (ACTION_LABELS[cfg.action] ?? cfg.action) : null;
+  // Coerce defensively — AI proposals may supply arrays or objects for any of these.
+  const action        = safeText(cfg.action);
+  const readSource    = safeText(cfg.readSource);
+  const channelFilter = safeText(cfg.channelFilter);
+  const channelTarget = safeText(cfg.channels || cfg.channel);
+  const userTarget    = safeText(cfg.userIds  || cfg.userId);
 
-  const channelTarget = coerceStr(cfg.channels || cfg.channel);
-  const userTarget    = coerceStr(cfg.userIds  || cfg.userId);
+  const actionLabel = action ? (ACTION_LABELS[action] ?? action) : null;
 
   const subtitle = (() => {
-    if (!cfg.action) return null;
-    if (cfg.action === 'send_message' && channelTarget)
+    if (!action) return null;
+    if (action === 'send_message' && channelTarget)
       return ` → #${channelTarget.split(',')[0].trim()}${channelTarget.includes(',') ? ' +more' : ''}`;
-    if (cfg.action === 'send_dm' && userTarget)
+    if (action === 'send_dm' && userTarget)
       return ` → @${userTarget.split(',')[0].trim()}${userTarget.includes(',') ? ' +more' : ''}`;
-    if (cfg.action === 'read_messages') {
-      if (cfg.readSource === 'dm' && userTarget) return ` DM @${userTarget}`;
+    if (action === 'read_messages') {
+      if (readSource === 'dm' && userTarget) return ` DM @${userTarget}`;
       if (channelTarget) return ` from #${channelTarget}`;
     }
-    if (cfg.action === 'read_thread') {
+    if (action === 'read_thread') {
       if (channelTarget) return ` in #${channelTarget.split(',')[0].trim()}`;
       return null;
     }
-    if (cfg.action === 'list_channels' && cfg.channelFilter && cfg.channelFilter !== 'all')
-      return ` (${cfg.channelFilter})`;
+    if (action === 'list_channels' && channelFilter && channelFilter !== 'all')
+      return ` (${channelFilter})`;
     return null;
   })();
 

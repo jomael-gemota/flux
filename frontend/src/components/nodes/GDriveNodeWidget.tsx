@@ -1,6 +1,7 @@
 import type { NodeProps, Node } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import type { CanvasNodeData } from '../../store/workflowStore';
+import { safeText } from '../../utils/nodeUtils';
 
 type GDriveNode = Node<CanvasNodeData, 'workflowNode'>;
 
@@ -21,15 +22,15 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 export function GDriveNodeWidget({ id, data, selected }: NodeProps<GDriveNode>) {
-  const cfg    = data.config as { action?: string; uploadFileName?: string; downloadFileName?: string; folderName?: string };
-  const action = cfg.action ?? '';
+  const cfg = data.config as { action?: unknown; uploadFileName?: unknown; downloadFileName?: unknown; folderName?: unknown };
+  const action = safeText(cfg.action);
   const label  = ACTION_LABELS[action] ?? action;
 
   const sub =
-    action === 'upload'        ? cfg.uploadFileName :
-    action === 'download'      ? cfg.downloadFileName :
-    action === 'create_folder' ? cfg.folderName :
-    undefined;
+    action === 'upload'        ? safeText(cfg.uploadFileName)   :
+    action === 'download'      ? safeText(cfg.downloadFileName) :
+    action === 'create_folder' ? safeText(cfg.folderName)       :
+    '';
 
   return (
     <BaseNode

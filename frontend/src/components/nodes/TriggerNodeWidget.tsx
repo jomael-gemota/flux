@@ -1,6 +1,7 @@
 import type { NodeProps, Node } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import type { CanvasNodeData } from '../../store/workflowStore';
+import { safeText } from '../../utils/nodeUtils';
 
 type TriggerNode = Node<CanvasNodeData, 'workflowNode'>;
 
@@ -48,23 +49,29 @@ const EVENT_LABELS: Record<string, string> = {
 
 export function TriggerNodeWidget({ id, data, selected }: NodeProps<TriggerNode>) {
   const cfg = data.config as {
-    triggerType?: string;
-    cronExpression?: string;
-    webhookMethod?: string;
-    appType?: string;
-    eventType?: string;
+    triggerType?: unknown;
+    cronExpression?: unknown;
+    webhookMethod?: unknown;
+    appType?: unknown;
+    eventType?: unknown;
   };
-  const typeLabel = cfg.triggerType ? (TYPE_LABELS[cfg.triggerType] ?? cfg.triggerType) : 'Manual';
+  const triggerType    = safeText(cfg.triggerType);
+  const cronExpression = safeText(cfg.cronExpression);
+  const webhookMethod  = safeText(cfg.webhookMethod);
+  const appType        = safeText(cfg.appType);
+  const eventType      = safeText(cfg.eventType);
+
+  const typeLabel = triggerType ? (TYPE_LABELS[triggerType] ?? triggerType) : 'Manual';
 
   let detail = '';
-  if (cfg.triggerType === 'webhook' && cfg.webhookMethod) detail = cfg.webhookMethod;
-  if (cfg.triggerType === 'cron' && cfg.cronExpression) detail = cfg.cronExpression;
-  if (cfg.triggerType === 'app_event' && cfg.appType) {
-    const appLabel = APP_LABELS[cfg.appType] ?? cfg.appType;
-    const evtLabel = cfg.eventType ? (EVENT_LABELS[cfg.eventType] ?? cfg.eventType) : 'event';
+  if (triggerType === 'webhook' && webhookMethod) detail = webhookMethod;
+  if (triggerType === 'cron' && cronExpression) detail = cronExpression;
+  if (triggerType === 'app_event' && appType) {
+    const appLabel = APP_LABELS[appType] ?? appType;
+    const evtLabel = eventType ? (EVENT_LABELS[eventType] ?? eventType) : 'event';
     detail = `${appLabel} → ${evtLabel}`;
   }
-  if (cfg.triggerType === 'email') detail = 'Gmail';
+  if (triggerType === 'email') detail = 'Gmail';
 
   return (
     <BaseNode

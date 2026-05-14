@@ -1,11 +1,14 @@
 import type { NodeProps, Node } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import type { CanvasNodeData } from '../../store/workflowStore';
+import { safeText } from '../../utils/nodeUtils';
 
 type HttpNode = Node<CanvasNodeData, 'workflowNode'>;
 
 export function HttpNodeWidget({ id, data, selected }: NodeProps<HttpNode>) {
-  const cfg = data.config as { method?: string; url?: string };
+  const cfg = data.config as { method?: unknown; url?: unknown };
+  const method = safeText(cfg.method);
+  const url    = safeText(cfg.url);
   return (
     <BaseNode
       nodeId={id}
@@ -16,10 +19,10 @@ export function HttpNodeWidget({ id, data, selected }: NodeProps<HttpNode>) {
       isSelected={selected}
       isDisabled={data.disabled}
     >
-      {cfg.url && (
+      {url && (
         <p className="text-[10px] text-slate-500 dark:text-slate-400">
-          <span className="font-semibold text-blue-600 dark:text-blue-400">{cfg.method ?? 'GET'}</span>{' '}
-          {cfg.url}
+          <span className="font-semibold text-blue-600 dark:text-blue-400">{method || 'GET'}</span>{' '}
+          {url}
         </p>
       )}
     </BaseNode>
