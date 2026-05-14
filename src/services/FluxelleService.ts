@@ -28,8 +28,10 @@ import OpenAI from 'openai';
 import type {
     ChatCompletionMessageParam,
     ChatCompletionTool,
-    ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions';
+import AnthropicVertex from '@anthropic-ai/sdk/vertex';
+import type Anthropic from '@anthropic-ai/sdk';
+import { GoogleAuth } from 'google-auth-library';
 import { SkillRegistry } from '../skills/SkillRegistry';
 import type { CredentialRepository } from '../repositories/CredentialRepository';
 import type { SlackAuthService } from './SlackAuthService';
@@ -121,6 +123,9 @@ export interface FluxelleChatRequest {
     workflow?: WorkflowSnapshot | null;
     /** Authenticated platform user — used to scope `list_credentials`. */
     userId?: string;
+    /** Which model to use. 'gpt-5.5' → OpenAI; 'claude-sonnet-4-6' → Vertex AI.
+     *  Defaults to DEFAULT_MODEL when omitted. */
+    model?: string;
 }
 
 /** One step in Fluxelle's reasoning trace — surfaced in the UI so users can
@@ -161,6 +166,15 @@ const MAX_TOOL_HOPS = 12;
  *  Mirrors the detection used in `src/llm/providers/OpenAIProvider.ts`. */
 const REASONING_MODEL_RE = /^(gpt-5|o\d)/i;
 
+/** Vertex AI resource name for Claude Sonnet 4.6. */
+const CLAUDE_VERTEX_MODEL = 'publishers/anthropic/models/claude-sonnet-4-6';
+/** Short model id used in the UI and in the chat request `model` field. */
+const CLAUDE_SHORT_ID = 'claude-sonnet-4-6';
+
+function isClaudeModel(model?: string): boolean {
+    return !!(model && (model === CLAUDE_SHORT_ID || model === CLAUDE_VERTEX_MODEL));
+}
+
 /** Optional dependencies that unlock data-grounding tools. */
 export interface FluxelleDataDeps {
     credentialRepo?: CredentialRepository;
@@ -171,7 +185,8 @@ export interface FluxelleDataDeps {
 }
 
 export class FluxelleService {
-    private client: OpenAI | null;
+    private openaiClient: OpenAI | null;
+    private vertexClient: AnthropicVertex | null;
     private deps: FluxelleDataDeps;
 
     constructor(
@@ -179,34 +194,82 @@ export class FluxelleService {
         deps: FluxelleDataDeps = {},
         apiKey?: string,
     ) {
-        const key = apiKey ?? process.env.OPENAI_API_KEY;
-        this.client = key ? new OpenAI({ apiKey: key }) : null;
-        this.deps   = deps;
+        const openaiKey = apiKey ?? process.env.OPENAI_API_KEY;
+        this.openaiClient = openaiKey ? new OpenAI({ apiKey: openaiKey }) : null;
+
+        const vertexProject = process.env.VERTEX_PROJECT;
+        if (vertexProject) {
+            // Build a GoogleAuth instance so credentials work on Railway (inline JSON)
+            // and locally/Docker (GOOGLE_APPLICATION_CREDENTIALS file path).
+            // Priority: GCP_SERVICE_ACCOUNT_JSON (PaaS) → ADC / GOOGLE_APPLICATION_CREDENTIALS (file).
+            const gcpJson = process.env.GCP_SERVICE_ACCOUNT_JSON;
+            const googleAuth = new GoogleAuth({
+                scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+                ...(gcpJson ? { credentials: JSON.parse(gcpJson) } : {}),
+            });
+            this.vertexClient = new AnthropicVertex({
+                projectId:  vertexProject,
+                region:     process.env.VERTEX_LOCATION ?? 'us-east5',
+                googleAuth,
+            });
+        } else {
+            this.vertexClient = null;
+        }
+
+        this.deps = deps;
     }
 
     isConfigured(): boolean {
-        return this.client !== null;
+        return this.openaiClient !== null || this.vertexClient !== null;
+    }
+
+    /** Returns the short model IDs that are actually configured and available. */
+    availableModels(): string[] {
+        const models: string[] = [];
+        if (this.openaiClient) models.push('gpt-5.5');
+        if (this.vertexClient) models.push(CLAUDE_SHORT_ID);
+        return models;
     }
 
     async chat(req: FluxelleChatRequest): Promise<FluxelleChatResponse> {
-        if (!this.client) {
+        if (!this.isConfigured()) {
             throw new Error(
-                'Fluxelle is not configured. Set OPENAI_API_KEY in your environment.'
+                'Fluxelle is not configured. Set OPENAI_API_KEY and/or VERTEX_PROJECT in your environment.'
             );
         }
 
-        const tools = this.buildTools();
+        if (isClaudeModel(req.model)) {
+            if (!this.vertexClient) {
+                throw new Error(
+                    'Claude Sonnet 4.6 is not configured. Set VERTEX_PROJECT and VERTEX_LOCATION in your environment.'
+                );
+            }
+            return this.chatWithAnthropic(req);
+        }
+
+        if (!this.openaiClient) {
+            throw new Error(
+                'GPT-5.5 is not configured. Set OPENAI_API_KEY in your environment.'
+            );
+        }
+        return this.chatWithOpenAI(req);
+    }
+
+    private async chatWithOpenAI(req: FluxelleChatRequest): Promise<FluxelleChatResponse> {
+        const client = this.openaiClient!;
+        const model  = (req.model && !isClaudeModel(req.model)) ? req.model : DEFAULT_MODEL;
+        const tools  = this.buildTools();
         const messages = this.buildMessages(req);
         const skillsUsed: string[] = [];
         const trace: FluxelleTraceStep[] = [];
         let proposal: WorkflowProposal | undefined;
         let question: FluxelleQuestion | undefined;
 
-        const isReasoningModel = REASONING_MODEL_RE.test(DEFAULT_MODEL);
+        const isReasoningModel = REASONING_MODEL_RE.test(model);
 
         for (let hop = 0; hop < MAX_TOOL_HOPS; hop++) {
-            const completion = await this.client.chat.completions.create({
-                model: DEFAULT_MODEL,
+            const completion = await client.chat.completions.create({
+                model,
                 // Reasoning models (gpt-5.x, o-series) only support the default
                 // temperature; passing 0.3 makes the API return a 400.
                 ...(isReasoningModel ? {} : { temperature: 0.3 }),
@@ -222,65 +285,141 @@ export class FluxelleService {
 
             const toolCalls = msg.tool_calls ?? [];
             if (toolCalls.length === 0) {
-                return {
-                    content: msg.content ?? '',
-                    proposal,
-                    question,
-                    skillsUsed,
-                    trace,
-                };
+                return { content: msg.content ?? '', proposal, question, skillsUsed, trace };
             }
 
             for (const call of toolCalls) {
-                const toolName = (call as any).function?.name as string | undefined ?? '';
-                let toolArgs: Record<string, unknown> = {};
-                try { toolArgs = JSON.parse((call as any).function?.arguments ?? '{}'); } catch { /* */ }
+                const normalized: NormalizedToolCall = {
+                    id:   call.id,
+                    name: call.function?.name ?? '',
+                    args: (() => {
+                        try { return JSON.parse(call.function?.arguments ?? '{}'); } catch { return {}; }
+                    })(),
+                };
 
-                const result = await this.runTool(call, skillsUsed, req.userId);
+                const result = await this.runTool(normalized, skillsUsed, req.userId);
                 if (result.proposal) proposal = result.proposal;
                 if (result.question) question = result.question;
 
                 trace.push({
-                    tool:   toolName,
-                    label:  buildTraceLabel(toolName, toolArgs, result.payload),
-                    detail: buildTraceDetail(toolName, toolArgs, result.payload),
+                    tool:   normalized.name,
+                    label:  buildTraceLabel(normalized.name, normalized.args, result.payload),
+                    detail: buildTraceDetail(normalized.name, normalized.args, result.payload),
                     status: result.payload['error'] ? 'error' : 'ok',
                 });
 
                 messages.push({
-                    role: 'tool',
+                    role:         'tool',
                     tool_call_id: call.id,
-                    content: JSON.stringify(result.payload),
+                    content:      JSON.stringify(result.payload),
                 });
 
                 if (result.terminal) {
                     const fallback =
                         typeof result.payload.message === 'string' ? result.payload.message : '';
-                    return {
-                        content: msg.content ?? fallback,
-                        proposal,
-                        question,
-                        skillsUsed,
-                        trace,
-                    };
+                    return { content: msg.content ?? fallback, proposal, question, skillsUsed, trace };
                 }
             }
         }
 
         return {
-            content:
-                "I'm having trouble settling on a final plan. Could you give me a bit more detail about what you want to build?",
-            proposal,
-            question,
-            skillsUsed,
-            trace,
+            content: "I'm having trouble settling on a final plan. Could you give me a bit more detail about what you want to build?",
+            proposal, question, skillsUsed, trace,
+        };
+    }
+
+    private async chatWithAnthropic(req: FluxelleChatRequest): Promise<FluxelleChatResponse> {
+        const client = this.vertexClient!;
+        const { system, messages } = this.buildAnthropicMessages(req);
+        const tools      = this.buildAnthropicTools();
+        const skillsUsed: string[] = [];
+        const trace: FluxelleTraceStep[] = [];
+        let proposal: WorkflowProposal | undefined;
+        let question: FluxelleQuestion | undefined;
+
+        for (let hop = 0; hop < MAX_TOOL_HOPS; hop++) {
+            const response = await client.messages.create({
+                model:      CLAUDE_VERTEX_MODEL,
+                system,
+                max_tokens: 8096,
+                messages,
+                tools,
+            });
+
+            // Push the full assistant content block array into the thread.
+            messages.push({ role: 'assistant', content: response.content });
+
+            const toolUseBlocks = response.content.filter(
+                (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use'
+            );
+
+            if (toolUseBlocks.length === 0) {
+                const textBlock = response.content.find(
+                    (b): b is Anthropic.TextBlock => b.type === 'text'
+                );
+                return {
+                    content: textBlock?.text ?? '',
+                    proposal, question, skillsUsed, trace,
+                };
+            }
+
+            // Collect all tool results for this hop into a single user message.
+            const toolResults: Anthropic.ToolResultBlockParam[] = [];
+            let terminalResult: FluxelleChatResponse | null = null;
+
+            for (const block of toolUseBlocks) {
+                const normalized: NormalizedToolCall = {
+                    id:   block.id,
+                    name: block.name,
+                    args: (block.input ?? {}) as Record<string, unknown>,
+                };
+
+                const result = await this.runTool(normalized, skillsUsed, req.userId);
+                if (result.proposal) proposal = result.proposal;
+                if (result.question) question = result.question;
+
+                trace.push({
+                    tool:   normalized.name,
+                    label:  buildTraceLabel(normalized.name, normalized.args, result.payload),
+                    detail: buildTraceDetail(normalized.name, normalized.args, result.payload),
+                    status: result.payload['error'] ? 'error' : 'ok',
+                });
+
+                toolResults.push({
+                    type:        'tool_result',
+                    tool_use_id: block.id,
+                    content:     JSON.stringify(result.payload),
+                });
+
+                if (result.terminal && !terminalResult) {
+                    const fallback =
+                        typeof result.payload.message === 'string' ? result.payload.message : '';
+                    const textBlock = response.content.find(
+                        (b): b is Anthropic.TextBlock => b.type === 'text'
+                    );
+                    terminalResult = {
+                        content: textBlock?.text ?? fallback,
+                        proposal, question, skillsUsed, trace,
+                    };
+                }
+            }
+
+            // Inject all results at once before checking for terminal.
+            messages.push({ role: 'user', content: toolResults });
+
+            if (terminalResult) return terminalResult;
+        }
+
+        return {
+            content: "I'm having trouble settling on a final plan. Could you give me a bit more detail about what you want to build?",
+            proposal, question, skillsUsed, trace,
         };
     }
 
     // ── Tool execution ────────────────────────────────────────────────────────
 
     private async runTool(
-        call: ChatCompletionMessageToolCall,
+        call: NormalizedToolCall,
         skillsUsed: string[],
         userId?: string,
     ): Promise<{
@@ -289,16 +428,8 @@ export class FluxelleService {
         question?: FluxelleQuestion;
         terminal?: boolean;
     }> {
-        let args: Record<string, unknown> = {};
-        try {
-            args = (call as any).function?.arguments
-                ? JSON.parse((call as any).function.arguments)
-                : {};
-        } catch {
-            return { payload: { error: 'Invalid JSON arguments' } };
-        }
-
-        const name = (call as any).function?.name as string | undefined;
+        const args = call.args;
+        const name = call.name;
 
         switch (name) {
             // ── Skills catalogue ───────────────────────────────────────────────
@@ -920,7 +1051,7 @@ export class FluxelleService {
 
     // ── Prompt + tool definitions ─────────────────────────────────────────────
 
-    private buildMessages(req: FluxelleChatRequest): ChatCompletionMessageParam[] {
+    private buildSystemPrompt(req: FluxelleChatRequest): string {
         const skillIndex = this.skills.listSummaries();
 
         const indexBlock = skillIndex
@@ -931,7 +1062,7 @@ export class FluxelleService {
             ? renderWorkflowSnapshot(req.workflow)
             : '_No workflow is open. Suggest creating one if appropriate._';
 
-        const system = [
+        return [
             'You are **Fluxelle**, the in-canvas AI assistant for Flux Workflow — a',
             'visual workflow automation platform. Your job is to help the user design,',
             'build, and edit workflows by proposing concrete node-level changes.',
@@ -982,6 +1113,10 @@ export class FluxelleService {
             '## Current workflow',
             workflowBlock,
         ].join('\n');
+    }
+
+    private buildMessages(req: FluxelleChatRequest): ChatCompletionMessageParam[] {
+        const system = this.buildSystemPrompt(req);
 
         const turns: ChatCompletionMessageParam[] = req.messages.map((m) => ({
             role: m.role,
@@ -989,6 +1124,28 @@ export class FluxelleService {
         }));
 
         return [{ role: 'system', content: system }, ...turns];
+    }
+
+    private buildAnthropicMessages(req: FluxelleChatRequest): {
+        system: string;
+        messages: Anthropic.MessageParam[];
+    } {
+        const system = this.buildSystemPrompt(req);
+
+        const messages: Anthropic.MessageParam[] = req.messages.map((m) => ({
+            role:    m.role as 'user' | 'assistant',
+            content: m.content,
+        }));
+
+        return { system, messages };
+    }
+
+    private buildAnthropicTools(): Anthropic.Tool[] {
+        return this.buildTools().map((t) => ({
+            name:         t.function.name,
+            description:  t.function.description ?? '',
+            input_schema: (t.function.parameters ?? { type: 'object', properties: {} }) as Anthropic.Tool['input_schema'],
+        }));
     }
 
     private buildTools(): ChatCompletionTool[] {
@@ -1392,6 +1549,13 @@ export class FluxelleService {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Provider-agnostic tool call description passed to `runTool()`. */
+interface NormalizedToolCall {
+    id:   string;
+    name: string;
+    args: Record<string, unknown>;
+}
 
 /** Canonical list of node types accepted by the backend schema. */
 const VALID_NODE_TYPES = new Set<string>([

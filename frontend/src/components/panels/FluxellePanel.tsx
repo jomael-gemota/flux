@@ -49,6 +49,7 @@ import {
 import * as api from '../../api/client';
 import type {
   FluxelleMessage,
+  FluxelleModelId,
   FluxelleQuestion,
   FluxelleTraceStep,
   QuestionAnswer,
@@ -58,6 +59,7 @@ import type {
   ConversationDetail,
   PersistedMessage,
 } from '../../types/fluxelle';
+import { FLUXELLE_MODELS } from '../../types/fluxelle';
 import type { NodeType } from '../../types/workflow';
 import { NodeIcon } from '../nodes/NodeIcons';
 import { FluxelleMarkdown } from './FluxelleMarkdown';
@@ -165,6 +167,7 @@ export function FluxellePanel() {
   const [input, setInput]       = useState('');
   /** conversationId of the currently active (auto-saved) conversation. */
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<FluxelleModelId>('gpt-5.5');
   const scrollRef    = useRef<HTMLDivElement>(null);
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
   /** Guard to only auto-load the last conversation once on mount. */
@@ -180,6 +183,17 @@ export function FluxellePanel() {
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [messages, chat.isPending]);
+
+  // Default selectedModel to first available when status loads
+  useEffect(() => {
+    const available = status.data?.availableModels;
+    if (!available?.length) return;
+    if (!available.includes(selectedModel)) {
+      setSelectedModel(available[0] as FluxelleModelId);
+    }
+  // Only re-run when availableModels changes, not on selectedModel changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status.data?.availableModels]);
 
   // Auto-restore last conversation when panel first opens
   useEffect(() => {
@@ -272,6 +286,7 @@ export function FluxellePanel() {
       const response = await chat.mutateAsync({
         messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
         workflow: snapshot,
+        model:    selectedModel,
       });
       const assistantMsg: FluxelleMessage = {
         id:        randomId(),
@@ -580,7 +595,35 @@ export function FluxellePanel() {
             <Send className="w-3.5 h-3.5" />
           </button>
         </div>
-        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 px-0.5">
+
+        {/* Model selector pills */}
+        <div className="flex items-center gap-1.5 mt-2 px-0.5">
+          {FLUXELLE_MODELS.map((m) => {
+            const isAvailable = status.data?.availableModels?.includes(m.id) ?? false;
+            const isActive    = selectedModel === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                disabled={!isAvailable || chat.isPending}
+                onClick={() => setSelectedModel(m.id)}
+                title={isAvailable ? `Use ${m.label}` : `${m.label} is not configured`}
+                className={[
+                  'text-[10px] font-medium px-2 py-0.5 rounded-full border transition-all',
+                  isActive && isAvailable
+                    ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-transparent shadow-sm'
+                    : isAvailable
+                    ? 'text-slate-500 dark:text-slate-400 border-slate-300 dark:border-slate-600 hover:border-violet-400 hover:text-violet-600 dark:hover:text-violet-400'
+                    : 'text-slate-300 dark:text-slate-600 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50',
+                ].join(' ')}
+              >
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 px-0.5">
           Fluxelle never edits the canvas without your approval.
         </p>
       </form>

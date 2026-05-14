@@ -92,9 +92,23 @@ export interface QuestionAnswer {
   freeText?: string;
 }
 
+/** Short model IDs Fluxelle understands. */
+export type FluxelleModelId = 'gpt-5.5' | 'claude-sonnet-4-6';
+
+export interface FluxelleModelOption {
+  id:    FluxelleModelId;
+  label: string;
+}
+
+export const FLUXELLE_MODELS: FluxelleModelOption[] = [
+  { id: 'gpt-5.5',           label: 'GPT-5.5' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+];
+
 export interface FluxelleStatus {
-  configured: boolean;
-  model: string;
+  configured:      boolean;
+  model:           string;
+  availableModels: string[];
 }
 
 export interface FluxelleChatResponse {

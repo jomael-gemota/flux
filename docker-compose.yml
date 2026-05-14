@@ -9,6 +9,13 @@ services:
       REDIS_URL: redis://redis:6379
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # Fluxelle — Claude Sonnet 4.6 via Vertex AI
+      # Local/Docker: set GOOGLE_APPLICATION_CREDENTIALS to the mounted SA key path.
+      # Railway/PaaS: set GCP_SERVICE_ACCOUNT_JSON to the key's full JSON string instead.
+      VERTEX_PROJECT: ${VERTEX_PROJECT:-}
+      VERTEX_LOCATION: ${VERTEX_LOCATION:-us-east5}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      GCP_SERVICE_ACCOUNT_JSON: ${GCP_SERVICE_ACCOUNT_JSON:-}
     depends_on:
       mongo:
         condition: service_healthy

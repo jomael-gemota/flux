@@ -65,6 +65,7 @@ const WorkflowSnapshotSchema = z.object({
 const ChatRequestSchema = z.object({
     messages: z.array(ChatMessageSchema).min(1),
     workflow: WorkflowSnapshotSchema.nullable().optional(),
+    model:    z.string().optional(),
 });
 
 const ConversationMessageSchema = z.object({
@@ -106,8 +107,9 @@ export async function fluxelleRoutes(
         '/fluxelle/status',
         { preHandler: apiKeyAuth },
         async () => ({
-            configured: fluxelle.isConfigured(),
-            model:      process.env.FLUXELLE_MODEL ?? 'gpt-5.5',
+            configured:      fluxelle.isConfigured(),
+            model:           process.env.FLUXELLE_MODEL ?? 'gpt-5.5',
+            availableModels: fluxelle.availableModels(),
         }),
     );
 
@@ -127,7 +129,7 @@ export async function fluxelleRoutes(
 
             if (!fluxelle.isConfigured()) {
                 throw BadRequestError(
-                    'Fluxelle is not configured on the server. Set OPENAI_API_KEY in your environment.',
+                    'Fluxelle is not configured on the server. Set OPENAI_API_KEY and/or VERTEX_PROJECT in your environment.',
                 );
             }
 

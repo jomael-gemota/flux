@@ -15,6 +15,7 @@ export function useFluxelleChat() {
     mutationFn: (body: {
       messages: Array<{ role: 'user' | 'assistant'; content: string }>;
       workflow?: WorkflowSnapshot | null;
+      model?: string;
     }) => api.fluxelleChat(body),
   });
 }

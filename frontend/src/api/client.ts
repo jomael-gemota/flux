@@ -625,6 +625,7 @@ export function getFluxelleStatus() {
 export function fluxelleChat(body: {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   workflow?: WorkflowSnapshot | null;
+  model?: string;
 }) {
   return request<FluxelleChatResponse>('/fluxelle/chat', {
     method: 'POST',
