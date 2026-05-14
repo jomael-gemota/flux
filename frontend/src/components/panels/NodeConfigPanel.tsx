@@ -5110,6 +5110,12 @@ function previewExtract(
 ): { value: unknown; error?: string } {
   if (!field.name) return { value: null };
   const s = field.strategy;
+  // Belt-and-suspenders: even though ExtractConfig normalizes inputs, this
+  // function is also used recursively (between/labeled rebuild a regex field)
+  // and a future caller might pass raw data. Bail safely instead of crashing.
+  if (!s || typeof s !== 'object' || typeof s.kind !== 'string') {
+    return { value: null };
+  }
   try {
     switch (s.kind) {
       case 'regex': {
@@ -5224,10 +5230,47 @@ const EXTRACT_MODE_DESCRIPTIONS: Record<string, string> = {
     'Walk through every item; for each field, take the first item where the rule matches. Returns one flat object — same shape as Single mode. Best when the values you need are scattered across multiple items (e.g. one email has the name, another has the address).',
 };
 
+/** Default strategy used when an AI proposal omits the `strategy` object on a field. */
+const DEFAULT_EXTRACT_STRATEGY: ExtractStrategyShape = {
+  kind: 'between',
+  before: '',
+  after: '',
+};
+
+/** Normalize a possibly-malformed Extract field (e.g. from a Fluxelle proposal)
+ *  so every downstream renderer can assume `field.strategy.kind` exists. */
+function normalizeExtractField(raw: unknown): ExtractFieldShape | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const f = raw as Partial<ExtractFieldShape> & Record<string, unknown>;
+  if (typeof f.name !== 'string' || !f.name) return null;
+
+  const rawStrategy = f.strategy as Partial<ExtractStrategyShape> | undefined;
+  const validKind: ExtractStrategyKind | null =
+    rawStrategy &&
+    typeof rawStrategy === 'object' &&
+    typeof rawStrategy.kind === 'string' &&
+    (['regex', 'between', 'labeled', 'jsonpath', 'ai'] as ExtractStrategyKind[]).includes(
+      rawStrategy.kind as ExtractStrategyKind,
+    )
+      ? (rawStrategy.kind as ExtractStrategyKind)
+      : null;
+
+  const strategy: ExtractStrategyShape = validKind
+    ? ({ ...rawStrategy, kind: validKind } as ExtractStrategyShape)
+    : DEFAULT_EXTRACT_STRATEGY;
+
+  return { ...(f as object), strategy } as ExtractFieldShape;
+}
+
 function ExtractConfig({ cfg, onChange, otherNodes, testResults }: ConfigProps) {
   const source     = String(cfg.source ?? '');
   const preprocess = String(cfg.preprocess ?? 'plain-text');
-  const fields     = (Array.isArray(cfg.fields) ? cfg.fields : []) as ExtractFieldShape[];
+  // Normalize defensively — Fluxelle proposals may omit `strategy` or use an
+  // unknown `kind`. Without this, ExtractFieldRow / previewExtract crash on
+  // `field.strategy.kind` access.
+  const fields     = (Array.isArray(cfg.fields) ? cfg.fields : [])
+    .map(normalizeExtractField)
+    .filter((f): f is ExtractFieldShape => f !== null);
   const mode       = String(cfg.mode ?? 'auto') as 'auto' | 'single' | 'each-item' | 'first-match';
   const textPath   = String(cfg.textPath ?? '');
   const aiProvider    = String(cfg.aiProvider    ?? 'openai');
