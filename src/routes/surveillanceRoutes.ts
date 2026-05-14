@@ -200,7 +200,11 @@ export async function surveillanceRoutes(
 
                 // Trigger types
                 const triggerNodes = nodes.filter((n) => n.type === 'trigger');
-                const triggerTypes = [...new Set(triggerNodes.map((n) => (n.config as Record<string, unknown>).triggerType as string).filter(Boolean))];
+                const triggerTypes = [...new Set(
+                    triggerNodes
+                        .map((n) => (n.config as Record<string, unknown> | undefined)?.triggerType as string | undefined)
+                        .filter((t): t is string => Boolean(t))
+                )];
 
                 return {
                     workflowId:  wf.workflowId,

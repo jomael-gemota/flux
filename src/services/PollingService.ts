@@ -101,13 +101,14 @@ export class PollingService {
 
     private registerWorkflow(
         workflowId: string,
-        nodes: Array<{ id: string; type: string; config: Record<string, unknown> }>,
+        nodes: Array<{ id: string; type: string; config?: Record<string, unknown> }>,
     ): number {
         const pollableNodes: PollableNode[] = (nodes ?? [])
             .filter((n) => {
                 if (n.type !== 'trigger') return false;
-                const cfg = n.config as unknown as TriggerNodeConfig;
-                return cfg.triggerType === 'app_event' || cfg.triggerType === 'email';
+                // Defensive: legacy / partially-saved trigger nodes may have no `config`.
+                const cfg = n.config as unknown as TriggerNodeConfig | undefined;
+                return cfg?.triggerType === 'app_event' || cfg?.triggerType === 'email';
                 // Instant-mode nodes remain in polling as a 1-minute safety-net
                 // fallback. PushSubscriptionService handles native push registration
                 // for supported services (GDrive/GSheets/Basecamp) so those arrive

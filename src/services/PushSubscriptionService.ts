@@ -59,8 +59,9 @@ export class PushSubscriptionService {
 
         for (const node of (workflow.nodes ?? [])) {
             if (node.type !== 'trigger') continue;
-            const cfg = node.config as unknown as TriggerConfig;
-            if (cfg.triggerMode !== 'instant' || cfg.triggerType !== 'app_event') continue;
+            // Defensive: legacy / partially-saved trigger nodes may have no `config`.
+            const cfg = node.config as unknown as TriggerConfig | undefined;
+            if (!cfg || cfg.triggerMode !== 'instant' || cfg.triggerType !== 'app_event') continue;
             if (!NATIVE_PUSH_SERVICES.has(cfg.appType ?? '')) continue;
 
             instantNodeIds.add(node.id);
