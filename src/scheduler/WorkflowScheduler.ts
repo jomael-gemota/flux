@@ -62,14 +62,15 @@ export class WorkflowScheduler {
 
     private registerWorkflow(
         workflowId: string,
-        nodes: Array<{ id: string; type: string; config: Record<string, unknown> }>,
+        nodes: Array<{ id: string; type: string; config?: Record<string, unknown> }>,
     ): void {
+        // Defensive: legacy / partially-saved trigger nodes may have no `config` object.
         const cronTriggers = (nodes ?? []).filter(
-            (n) => n.type === 'trigger' && (n.config as Record<string, unknown>).triggerType === 'cron'
+            (n) => n.type === 'trigger' && n.config?.triggerType === 'cron'
         );
 
         for (const node of cronTriggers) {
-            const expr = (node.config as Record<string, unknown>).cronExpression as string | undefined;
+            const expr = node.config?.cronExpression as string | undefined;
             if (expr) {
                 this.registerTask(workflowId, node.id, expr);
             }
