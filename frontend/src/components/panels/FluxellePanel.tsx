@@ -41,6 +41,7 @@ import { useSaveWorkflow } from '../../hooks/useSaveWorkflow';
 import {
   useFluxelleChat,
   useFluxelleStatus,
+  useMyCredits,
   useConversations,
   useCreateConversation,
   useUpdateConversation,
@@ -52,6 +53,7 @@ import type {
   FluxelleModelId,
   FluxelleQuestion,
   FluxelleTraceStep,
+  FluxelleUsage,
   QuestionAnswer,
   WorkflowProposal,
   WorkflowSnapshot,
@@ -112,6 +114,7 @@ function toPersistedMessages(msgs: FluxelleMessage[]): PersistedMessage[] {
     question:       m.question ?? null,
     questionAnswer: m.questionAnswer ?? null,
     trace:          m.trace ?? null,
+    usage:          m.usage ?? null,
     createdAt:      m.createdAt,
   }));
 }
@@ -127,6 +130,7 @@ function fromPersistedMessages(msgs: PersistedMessage[]): FluxelleMessage[] {
     question:       m.question ?? undefined,
     questionAnswer: m.questionAnswer ?? undefined,
     trace:          m.trace ?? undefined,
+    usage:          m.usage ?? undefined,
     createdAt:      m.createdAt,
   }));
 }
@@ -148,8 +152,9 @@ function describeAnswer(question: FluxelleQuestion, answer: QuestionAnswer): str
 type PanelView = 'chat' | 'history';
 
 export function FluxellePanel() {
-  const status   = useFluxelleStatus();
-  const chat     = useFluxelleChat();
+  const status  = useFluxelleStatus();
+  const chat    = useFluxelleChat();
+  const credits = useMyCredits();
   const convList = useConversations();
   const createConv  = useCreateConversation();
   const updateConv  = useUpdateConversation();
@@ -303,6 +308,7 @@ export function FluxellePanel() {
         proposal:  response.proposal,
         question:  response.question,
         trace:     response.trace?.length ? response.trace : undefined,
+        usage:     response.usage,
         createdAt: new Date().toISOString(),
       };
       const allMessages = [...nextMessages, assistantMsg];
@@ -522,36 +528,48 @@ export function FluxellePanel() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="px-3 py-2.5 border-b border-black/[0.07] dark:border-white/10 flex items-center gap-2 shrink-0">
-        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-sm shrink-0">
-          <Sparkles className="w-3.5 h-3.5 text-white" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-[12.5px] font-semibold text-gray-900 dark:text-white leading-tight">Fluxelle</div>
-          <div className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight truncate">
-            {activeTitle ?? 'Your in-canvas workflow assistant'}
+      <div className="border-b border-black/[0.07] dark:border-white/10 shrink-0">
+        <div className="px-3 py-2.5 flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-sm shrink-0">
+            <Sparkles className="w-3.5 h-3.5 text-white" />
           </div>
-        </div>
-        <div className="flex items-center gap-0.5">
-          {messages.length > 0 && (
+          <div className="flex-1 min-w-0">
+            <div className="text-[12.5px] font-semibold text-gray-900 dark:text-white leading-tight">Fluxelle</div>
+            <div className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight truncate">
+              {activeTitle ?? 'Your in-canvas workflow assistant'}
+            </div>
+          </div>
+          <div className="flex items-center gap-0.5">
+            {messages.length > 0 && (
+              <button
+                type="button"
+                onClick={startNewConversation}
+                title="New conversation"
+                className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+              >
+                <SquarePen className="w-3.5 h-3.5" />
+              </button>
+            )}
             <button
               type="button"
-              onClick={startNewConversation}
-              title="New conversation"
+              onClick={() => setView('history')}
+              title="Chat history"
               className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
             >
-              <SquarePen className="w-3.5 h-3.5" />
+              <History className="w-3.5 h-3.5" />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setView('history')}
-            title="Chat history"
-            className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
-          >
-            <History className="w-3.5 h-3.5" />
-          </button>
+          </div>
         </div>
+
+        {/* Credit meter — hidden while loading or if credits API isn't available */}
+        {credits.data && (
+          <CreditMeter
+            creditsUsed={credits.data.creditsUsed}
+            dailyLimit={credits.data.dailyLimit}
+            remaining={credits.data.remaining}
+            resetAt={credits.data.resetAt}
+          />
+        )}
       </div>
 
       {/* Messages */}
@@ -574,6 +592,7 @@ export function FluxellePanel() {
             onAnswerQuestion={(q, a) => handleAnswerQuestion(m.id, q, a)}
           />
         ))}
+
 
         {chat.isPending && <ThinkingIndicator />}
       </div>
@@ -921,6 +940,7 @@ function MessageBubble({
             onDecline={onDecline}
           />
         )}
+        {message.usage && <UsagePill usage={message.usage} />}
       </div>
     </div>
   );
@@ -1235,6 +1255,86 @@ function ProposalCard({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Credit meter (header) ─────────────────────────────────────────────────────
+
+function CreditMeter({
+  creditsUsed,
+  dailyLimit,
+  remaining,
+  resetAt,
+}: {
+  creditsUsed: number;
+  dailyLimit:  number;
+  remaining:   number;
+  resetAt:     string;
+}) {
+  const pct     = dailyLimit > 0 ? Math.min(1, creditsUsed / dailyLimit) : 0;
+  const pctLeft = 1 - pct;
+
+  // Colour shifts as credits run out: violet → amber → red
+  const barColor =
+    pctLeft > 0.3  ? 'bg-violet-500 dark:bg-violet-400'
+    : pctLeft > 0.1 ? 'bg-amber-400 dark:bg-amber-400'
+    : 'bg-red-500 dark:bg-red-400';
+
+  const textColor =
+    pctLeft > 0.3  ? 'text-violet-600 dark:text-violet-400'
+    : pctLeft > 0.1 ? 'text-amber-600 dark:text-amber-400'
+    : 'text-red-600 dark:text-red-400';
+
+  // Human-readable "resets in Xh Ym"
+  const msLeft    = new Date(resetAt).getTime() - Date.now();
+  const totalMins = Math.max(0, Math.floor(msLeft / 60_000));
+  const hours     = Math.floor(totalMins / 60);
+  const mins      = totalMins % 60;
+  const resetLabel = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+
+  return (
+    <div className="px-3 pb-2.5">
+      <div className="flex items-center justify-between mb-1">
+        <div className={`flex items-center gap-1 text-[10px] font-semibold ${textColor}`}>
+          <Zap className="w-2.5 h-2.5" />
+          <span>{remaining.toLocaleString()} / {dailyLimit.toLocaleString()} credits</span>
+        </div>
+        <span className="text-[9.5px] text-slate-400 dark:text-slate-500">
+          resets in {resetLabel}
+        </span>
+      </div>
+      {/* Track */}
+      <div className="h-1 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+          style={{ width: `${Math.max(0, (1 - pct) * 100)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── Usage pill (per assistant message) ────────────────────────────────────────
+
+function UsagePill({ usage }: { usage: FluxelleUsage }) {
+  return (
+    <div className="flex items-center gap-2 mt-0.5 text-[9.5px] text-slate-400 dark:text-slate-500 select-none">
+      <span title="Prompt tokens" className="flex items-center gap-0.5">
+        ↑ {usage.promptTokens.toLocaleString()}
+      </span>
+      <span className="opacity-40">·</span>
+      <span title="Completion tokens" className="flex items-center gap-0.5">
+        ↓ {usage.completionTokens.toLocaleString()}
+      </span>
+      <span className="opacity-40">·</span>
+      <span
+        title={`${usage.creditsConsumed} credit${usage.creditsConsumed !== 1 ? 's' : ''} consumed`}
+        className="flex items-center gap-0.5 font-semibold text-violet-500 dark:text-violet-400"
+      >
+        <Zap className="w-2.5 h-2.5" />
+        {usage.creditsConsumed} cr
+      </span>
     </div>
   );
 }

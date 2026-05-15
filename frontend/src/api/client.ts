@@ -616,6 +616,7 @@ import type {
   WorkflowSnapshot,
   SkillSummary,
   SkillDetail,
+  CreditSnapshot,
 } from '../types/fluxelle';
 
 export function getFluxelleStatus() {
@@ -639,6 +640,11 @@ export function listSkills() {
 
 export function getSkill(name: string) {
   return request<SkillDetail>(`/skills/${encodeURIComponent(name)}`);
+}
+
+/** Returns the authenticated user's credit snapshot for today. */
+export function getMyCredits() {
+  return request<CreditSnapshot>('/me/credits');
 }
 
 // ── Fluxelle conversation history ─────────────────────────────────────────────

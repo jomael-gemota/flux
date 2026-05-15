@@ -52,6 +52,8 @@ import { fileRoutes } from './routes/fileRoutes';
 import { fluxelleRoutes } from './routes/fluxelleRoutes';
 import { FluxelleService } from './services/FluxelleService';
 import { SkillRegistry } from './skills/SkillRegistry';
+import { CreditService } from './services/CreditService';
+import { creditRoutes } from './routes/creditRoutes';
 import { FluxelleConversationRepository } from './repositories/FluxelleConversationRepository';
 import { UserAuthService } from './services/UserAuthService';
 import { EmailNotificationService } from './services/EmailNotificationService';
@@ -224,15 +226,16 @@ async function bootstrap() {
 
     // Fluxelle — in-canvas AI workflow assistant
     const skillRegistry    = new SkillRegistry();
-    const fluxelleService  = new FluxelleService(skillRegistry, {
-        credentialRepo,
-        slackAuth,
-        googleAuth,
-        teamsAuth,
-        basecampAuth,
-    });
+    const creditService    = new CreditService();
+    const fluxelleService  = new FluxelleService(
+        skillRegistry,
+        { credentialRepo, slackAuth, googleAuth, teamsAuth, basecampAuth },
+        undefined,
+        creditService,
+    );
     const conversationRepo = new FluxelleConversationRepository();
     await fastify.register(fluxelleRoutes, { prefix: '/api', fluxelle: fluxelleService, skills: skillRegistry, conversations: conversationRepo });
+    await fastify.register(creditRoutes, { prefix: '/api', creditService });
     // Auth & admin (no prefix-level auth guard — each route manages its own)
     await fastify.register(authRoutes,  { prefix: '/api', userAuth });
     await fastify.register(adminRoutes,      { prefix: '/api' });

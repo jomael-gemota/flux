@@ -38,6 +38,8 @@ import type { GoogleAuthService } from './GoogleAuthService';
 import type { TeamsAuthService } from './TeamsAuthService';
 import type { BasecampAuthService } from './BasecampAuthService';
 import type { WorkflowDefinition, WorkflowNode, NodeType } from '../types/workflow.types';
+import type { CreditService } from './CreditService';
+import { tokensToCredits } from '../config/creditRates';
 
 // ── Public input/output types ─────────────────────────────────────────────────
 
@@ -152,6 +154,15 @@ export interface FluxelleChatResponse {
     /** Ordered log of tool calls made during this turn — rendered in the UI
      *  as a collapsible "Reasoning" section inside the assistant bubble. */
     trace: FluxelleTraceStep[];
+    /** Token and credit consumption for this entire turn (across all hops). */
+    usage: {
+        promptTokens:     number;
+        completionTokens: number;
+        totalTokens:      number;
+        /** Credits deducted from the user's daily allowance. */
+        creditsConsumed:  number;
+        model:            string;
+    };
 }
 
 // ── Service ──────────────────────────────────────────────────────────────────
@@ -189,6 +200,7 @@ export class FluxelleService {
     private vertexProject: string | null;
     private vertexLocation: string;
     private deps: FluxelleDataDeps;
+    private creditService: CreditService | null;
     /** Static portion of the system prompt — persona, rules, and skills index.
      *  Computed once at construction time so it never changes between requests,
      *  which lets both OpenAI's automatic prefix cache and Anthropic's explicit
@@ -199,6 +211,7 @@ export class FluxelleService {
         private skills: SkillRegistry,
         deps: FluxelleDataDeps = {},
         apiKey?: string,
+        creditService?: CreditService,
     ) {
         const openaiKey = apiKey ?? process.env.OPENAI_API_KEY;
         this.openaiClient = openaiKey ? new OpenAI({ apiKey: openaiKey }) : null;
@@ -219,6 +232,7 @@ export class FluxelleService {
         }
 
         this.deps = deps;
+        this.creditService = creditService ?? null;
         this.staticSystemPrompt = this.buildStaticSystemPrompt();
     }
 
@@ -268,7 +282,29 @@ export class FluxelleService {
         let proposal: WorkflowProposal | undefined;
         let question: FluxelleQuestion | undefined;
 
+        let totalPromptTokens     = 0;
+        let totalCompletionTokens = 0;
+
         const isReasoningModel = REASONING_MODEL_RE.test(model);
+
+        /** Finalise the response: consume credits and attach the usage object. */
+        const finish = async (
+            partial: Omit<FluxelleChatResponse, 'usage'>,
+        ): Promise<FluxelleChatResponse> => {
+            const creditsConsumed = await this.consumeCredits(
+                req.userId, model, totalPromptTokens, totalCompletionTokens,
+            );
+            return {
+                ...partial,
+                usage: {
+                    promptTokens:     totalPromptTokens,
+                    completionTokens: totalCompletionTokens,
+                    totalTokens:      totalPromptTokens + totalCompletionTokens,
+                    creditsConsumed,
+                    model,
+                },
+            };
+        };
 
         for (let hop = 0; hop < MAX_TOOL_HOPS; hop++) {
             const completion = await client.chat.completions.create({
@@ -281,6 +317,10 @@ export class FluxelleService {
                 tool_choice: 'auto',
             });
 
+            // Accumulate token usage across all hops in the loop.
+            totalPromptTokens     += completion.usage?.prompt_tokens     ?? 0;
+            totalCompletionTokens += completion.usage?.completion_tokens ?? 0;
+
             const choice = completion.choices[0];
             const msg    = choice.message;
 
@@ -288,7 +328,7 @@ export class FluxelleService {
 
             const toolCalls = msg.tool_calls ?? [];
             if (toolCalls.length === 0) {
-                return { content: msg.content ?? '', proposal, question, skillsUsed, trace };
+                return finish({ content: msg.content ?? '', proposal, question, skillsUsed, trace });
             }
 
             for (const call of toolCalls) {
@@ -322,15 +362,15 @@ export class FluxelleService {
                 if (result.terminal) {
                     const fallback =
                         typeof result.payload.message === 'string' ? result.payload.message : '';
-                    return { content: msg.content ?? fallback, proposal, question, skillsUsed, trace };
+                    return finish({ content: msg.content ?? fallback, proposal, question, skillsUsed, trace });
                 }
             }
         }
 
-        return {
+        return finish({
             content: "I'm having trouble settling on a final plan. Could you give me a bit more detail about what you want to build?",
             proposal, question, skillsUsed, trace,
-        };
+        });
     }
 
     private async chatWithAnthropic(req: FluxelleChatRequest): Promise<FluxelleChatResponse> {
@@ -341,8 +381,35 @@ export class FluxelleService {
         let proposal: WorkflowProposal | undefined;
         let question: FluxelleQuestion | undefined;
 
+        let totalPromptTokens     = 0;
+        let totalCompletionTokens = 0;
+
+        const finish = async (
+            partial: Omit<FluxelleChatResponse, 'usage'>,
+        ): Promise<FluxelleChatResponse> => {
+            const creditsConsumed = await this.consumeCredits(
+                req.userId, CLAUDE_SHORT_ID, totalPromptTokens, totalCompletionTokens,
+            );
+            return {
+                ...partial,
+                usage: {
+                    promptTokens:     totalPromptTokens,
+                    completionTokens: totalCompletionTokens,
+                    totalTokens:      totalPromptTokens + totalCompletionTokens,
+                    creditsConsumed,
+                    model: CLAUDE_SHORT_ID,
+                },
+            };
+        };
+
         for (let hop = 0; hop < MAX_TOOL_HOPS; hop++) {
             const response = await this.callVertexAPI({ system, messages, tools, max_tokens: 8096 });
+
+            // Accumulate token usage. Vertex returns the same usage shape as the
+            // direct Anthropic API: input_tokens + output_tokens.
+            const u = response.usage;
+            totalPromptTokens     += (u?.input_tokens ?? 0) + (u?.cache_creation_input_tokens ?? 0) + (u?.cache_read_input_tokens ?? 0);
+            totalCompletionTokens += u?.output_tokens ?? 0;
 
             // Push the full assistant content block array into the thread.
             messages.push({ role: 'assistant', content: response.content as Anthropic.ContentBlockParam[] });
@@ -356,15 +423,12 @@ export class FluxelleService {
                 const textBlock = content.find(
                     (b: Anthropic.ContentBlock): b is Anthropic.TextBlock => b.type === 'text'
                 );
-                return {
-                    content: textBlock?.text ?? '',
-                    proposal, question, skillsUsed, trace,
-                };
+                return finish({ content: textBlock?.text ?? '', proposal, question, skillsUsed, trace });
             }
 
             // Collect all tool results for this hop into a single user message.
             const toolResults: Anthropic.ToolResultBlockParam[] = [];
-            let terminalResult: FluxelleChatResponse | null = null;
+            let terminalPartial: Omit<FluxelleChatResponse, 'usage'> | null = null;
 
             for (const block of toolUseBlocks) {
                 const normalized: NormalizedToolCall = {
@@ -390,13 +454,13 @@ export class FluxelleService {
                     content:     JSON.stringify(result.payload),
                 });
 
-                if (result.terminal && !terminalResult) {
+                if (result.terminal && !terminalPartial) {
                     const fallback =
                         typeof result.payload.message === 'string' ? result.payload.message : '';
                     const textBlock = content.find(
                         (b: Anthropic.ContentBlock): b is Anthropic.TextBlock => b.type === 'text'
                     );
-                    terminalResult = {
+                    terminalPartial = {
                         content: textBlock?.text ?? fallback,
                         proposal, question, skillsUsed, trace,
                     };
@@ -406,13 +470,13 @@ export class FluxelleService {
             // Inject all results at once before checking for terminal.
             messages.push({ role: 'user', content: toolResults });
 
-            if (terminalResult) return terminalResult;
+            if (terminalPartial) return finish(terminalPartial);
         }
 
-        return {
+        return finish({
             content: "I'm having trouble settling on a final plan. Could you give me a bit more detail about what you want to build?",
             proposal, question, skillsUsed, trace,
-        };
+        });
     }
 
     /**
@@ -429,7 +493,16 @@ export class FluxelleService {
         messages: Anthropic.MessageParam[];
         tools: Anthropic.Tool[];
         max_tokens: number;
-    }): Promise<{ content: unknown[]; stop_reason: string }> {
+    }): Promise<{
+        content:    unknown[];
+        stop_reason: string;
+        usage?: {
+            input_tokens:                  number;
+            output_tokens:                 number;
+            cache_creation_input_tokens?:  number;
+            cache_read_input_tokens?:      number;
+        };
+    }> {
         const authClient = await this.vertexAuth!.getClient();
         const tokenResponse = await authClient.getAccessToken();
         const token = tokenResponse.token;
@@ -459,6 +532,28 @@ export class FluxelleService {
         }
 
         return res.json() as Promise<{ content: unknown[]; stop_reason: string }>;
+    }
+
+    // ── Credit helpers ────────────────────────────────────────────────────────
+
+    /**
+     * Records credit consumption when CreditService is wired up.
+     * Falls back to a pure calculation (no DB write) when it isn't, so usage
+     * numbers still appear in the response even in minimal deployments.
+     */
+    private async consumeCredits(
+        userId: string | undefined,
+        model:  string,
+        promptTokens:     number,
+        completionTokens: number,
+    ): Promise<number> {
+        if (this.creditService && userId) {
+            const result = await this.creditService.consume(
+                userId, model, promptTokens, completionTokens,
+            );
+            return result.creditsConsumed;
+        }
+        return tokensToCredits(model, promptTokens, completionTokens);
     }
 
     // ── Tool execution ────────────────────────────────────────────────────────

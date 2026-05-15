@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as api from '../api/client';
 import type { PersistedMessage, WorkflowSnapshot } from '../types/fluxelle';
 
+export const CREDITS_KEY = ['me', 'credits'] as const;
+
 export function useFluxelleStatus() {
   return useQuery({
     queryKey: ['fluxelle', 'status'],
@@ -10,13 +12,26 @@ export function useFluxelleStatus() {
   });
 }
 
+/** Fetches today's credit snapshot; refreshes every 60 s in the background. */
+export function useMyCredits() {
+  return useQuery({
+    queryKey:       CREDITS_KEY,
+    queryFn:        () => api.getMyCredits(),
+    staleTime:      30_000,
+    refetchInterval: 60_000,
+  });
+}
+
 export function useFluxelleChat() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: {
       messages: Array<{ role: 'user' | 'assistant'; content: string }>;
       workflow?: WorkflowSnapshot | null;
       model?: string;
     }) => api.fluxelleChat(body),
+    /** Immediately refresh the credit meter after every assistant response. */
+    onSuccess: () => { qc.invalidateQueries({ queryKey: CREDITS_KEY }); },
   });
 }
 

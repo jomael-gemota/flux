@@ -11,6 +11,15 @@ export interface FluxelleTraceStep {
   status:  'ok' | 'error';
 }
 
+/** Token and credit consumption for one assistant turn (across all hops). */
+export interface FluxelleUsage {
+  promptTokens:     number;
+  completionTokens: number;
+  totalTokens:      number;
+  creditsConsumed:  number;
+  model:            string;
+}
+
 export interface FluxelleMessage {
   /** Stable id for keying the React list. */
   id: string;
@@ -26,6 +35,8 @@ export interface FluxelleMessage {
   questionAnswer?: QuestionAnswer;
   /** Ordered trace of tool calls Fluxelle made to produce this message. */
   trace?: FluxelleTraceStep[];
+  /** Token and credit usage for this assistant turn. Only present on assistant messages. */
+  usage?: FluxelleUsage;
   /** ISO timestamp; rendered as the message timestamp. */
   createdAt: string;
 }
@@ -117,6 +128,21 @@ export interface FluxelleChatResponse {
   question?: FluxelleQuestion;
   skillsUsed: string[];
   trace: FluxelleTraceStep[];
+  usage: FluxelleUsage;
+}
+
+/** Today's credit snapshot returned by GET /api/me/credits. */
+export interface CreditSnapshot {
+  creditsUsed: number;
+  dailyLimit:  number;
+  remaining:   number;
+  /** ISO timestamp of midnight UTC tomorrow — when the counter resets. */
+  resetAt:     string;
+  breakdown:   Record<string, {
+    promptTokens:     number;
+    completionTokens: number;
+    credits:          number;
+  }>;
 }
 
 export interface SkillSummary {
@@ -144,6 +170,7 @@ export interface PersistedMessage {
   question?:      FluxelleQuestion | null;
   questionAnswer?: QuestionAnswer | null;
   trace?:         FluxelleTraceStep[] | null;
+  usage?:         FluxelleUsage | null;
   createdAt:      string;
 }
 
