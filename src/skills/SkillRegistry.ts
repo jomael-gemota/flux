@@ -10,6 +10,7 @@ import { skill as switchNode }               from './catalog/switch-node';
 import { skill as slackSendMessage }         from './catalog/slack-send-message';
 import { skill as slackSendDm }              from './catalog/slack-send-dm';
 import { skill as slackRead }                from './catalog/slack-read';
+import { skill as slackChannels }            from './catalog/slack-channels';
 import { skill as slackUploadFile }          from './catalog/slack-upload-file';
 import { skill as gmailSend }                from './catalog/gmail-send';
 import { skill as gmailRead }                from './catalog/gmail-read';
@@ -55,6 +56,7 @@ const ALL_SKILLS: Skill[] = [
     slackSendMessage,
     slackSendDm,
     slackRead,
+    slackChannels,
     slackUploadFile,
     // Gmail
     gmailSend,
