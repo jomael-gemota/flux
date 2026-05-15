@@ -189,6 +189,11 @@ export class FluxelleService {
     private vertexProject: string | null;
     private vertexLocation: string;
     private deps: FluxelleDataDeps;
+    /** Static portion of the system prompt — persona, rules, and skills index.
+     *  Computed once at construction time so it never changes between requests,
+     *  which lets both OpenAI's automatic prefix cache and Anthropic's explicit
+     *  prompt-caching blocks work without invalidating on every turn. */
+    private readonly staticSystemPrompt: string;
 
     constructor(
         private skills: SkillRegistry,
@@ -214,6 +219,7 @@ export class FluxelleService {
         }
 
         this.deps = deps;
+        this.staticSystemPrompt = this.buildStaticSystemPrompt();
     }
 
     isConfigured(): boolean {
@@ -413,9 +419,13 @@ export class FluxelleService {
      * Calls the Vertex AI rawPredict endpoint for Claude.
      * Uses google-auth-library for auth — works with GOOGLE_APPLICATION_CREDENTIALS (file)
      * and GCP_SERVICE_ACCOUNT_JSON (inline JSON string, for Railway / PaaS).
+     *
+     * `system` accepts either a plain string or an array of TextBlockParam objects.
+     * Passing an array with `cache_control: { type: "ephemeral" }` on the static
+     * block activates Anthropic's prompt caching through the Vertex passthrough API.
      */
     private async callVertexAPI(body: {
-        system: string;
+        system: string | Anthropic.TextBlockParam[];
         messages: Anthropic.MessageParam[];
         tools: Anthropic.Tool[];
         max_tokens: number;
@@ -432,8 +442,10 @@ export class FluxelleService {
         const res = await fetch(url, {
             method: 'POST',
             headers: {
-                Authorization:  `Bearer ${token}`,
-                'Content-Type': 'application/json',
+                Authorization:    `Bearer ${token}`,
+                'Content-Type':   'application/json',
+                // Enables Anthropic prompt caching on the Vertex passthrough API.
+                'anthropic-beta': 'prompt-caching-2024-07-31',
             },
             body: JSON.stringify({
                 anthropic_version: 'vertex-2023-10-16',
@@ -1084,16 +1096,16 @@ export class FluxelleService {
 
     // ── Prompt + tool definitions ─────────────────────────────────────────────
 
-    private buildSystemPrompt(req: FluxelleChatRequest): string {
-        const skillIndex = this.skills.listSummaries();
-
-        const indexBlock = skillIndex
+    /**
+     * Builds the portion of the system prompt that never changes between
+     * requests: persona, behavioural rules, and the skills catalogue index.
+     * Called once in the constructor; the result is stored in
+     * `this.staticSystemPrompt` so every request reuses the same string.
+     */
+    private buildStaticSystemPrompt(): string {
+        const indexBlock = this.skills.listSummaries()
             .map((s) => `- ${s.name} [${s.category}] — ${s.summary}`)
             .join('\n');
-
-        const workflowBlock = req.workflow
-            ? renderWorkflowSnapshot(req.workflow)
-            : '_No workflow is open. Suggest creating one if appropriate._';
 
         return [
             'You are **Fluxelle**, the in-canvas AI assistant for Flux Workflow — a',
@@ -1142,28 +1154,80 @@ export class FluxelleService {
             '',
             '## Skills catalogue',
             indexBlock,
-            '',
-            '## Current workflow',
-            workflowBlock,
         ].join('\n');
     }
 
-    private buildMessages(req: FluxelleChatRequest): ChatCompletionMessageParam[] {
-        const system = this.buildSystemPrompt(req);
+    /** Renders the per-request workflow block that is kept separate from the
+     *  cached static prompt so only this dynamic portion is ever re-read. */
+    private buildWorkflowBlock(workflow?: WorkflowSnapshot | null): string {
+        return workflow
+            ? renderWorkflowSnapshot(workflow)
+            : '_No workflow is open. Suggest creating one if appropriate._';
+    }
 
+    /**
+     * Builds the OpenAI messages array.
+     *
+     * The system message contains only the static prompt so OpenAI's
+     * automatic prefix caching can apply consistently across all requests.
+     * The workflow snapshot is injected as a synthetic user/assistant
+     * exchange immediately before the real conversation turns; this keeps
+     * the dynamic content out of the cacheable prefix while still giving
+     * the model full context.
+     */
+    private buildMessages(req: FluxelleChatRequest): ChatCompletionMessageParam[] {
         const turns: ChatCompletionMessageParam[] = req.messages.map((m) => ({
             role: m.role,
             content: m.content,
         }));
 
-        return [{ role: 'system', content: system }, ...turns];
+        const workflowContext: ChatCompletionMessageParam[] = req.workflow
+            ? [
+                {
+                    role: 'user',
+                    content: `[Context] Current workflow snapshot:\n${this.buildWorkflowBlock(req.workflow)}`,
+                },
+                {
+                    role: 'assistant',
+                    content: 'Understood — I have the current workflow in context.',
+                },
+            ]
+            : [];
+
+        return [
+            { role: 'system', content: this.staticSystemPrompt },
+            ...workflowContext,
+            ...turns,
+        ];
     }
 
+    /**
+     * Builds the Anthropic messages for the Claude / Vertex path.
+     *
+     * The system prompt is split into two content blocks:
+     *   1. The static block (persona + rules + skills index) — marked with
+     *      `cache_control: { type: "ephemeral" }` so Anthropic caches it for
+     *      5 minutes.  Within a multi-hop tool loop (up to 12 calls) this
+     *      block is read once and the remaining hops pull it from cache at
+     *      ~10 % of the normal input-token price.
+     *   2. The dynamic block (current workflow snapshot) — sent fresh on
+     *      every call because it legitimately varies per request.
+     */
     private buildAnthropicMessages(req: FluxelleChatRequest): {
-        system: string;
+        system: Anthropic.TextBlockParam[];
         messages: Anthropic.MessageParam[];
     } {
-        const system = this.buildSystemPrompt(req);
+        const system: Anthropic.TextBlockParam[] = [
+            {
+                type: 'text',
+                text: this.staticSystemPrompt,
+                cache_control: { type: 'ephemeral' },
+            },
+            {
+                type: 'text',
+                text: `## Current workflow\n${this.buildWorkflowBlock(req.workflow)}`,
+            },
+        ];
 
         const messages: Anthropic.MessageParam[] = req.messages.map((m) => ({
             role:    m.role as 'user' | 'assistant',
