@@ -472,6 +472,7 @@ export class GmailNode implements NodeExecutor {
             const smtpUser = process.env.SMTP_USER;
             const smtpPass = process.env.SMTP_PASS;
             const smtpFrom = process.env.SMTP_FROM_ADDRESS;
+            const smtpReplyTo = process.env.SMTP_REPLY_TO?.trim() || undefined;
             const fromName = process.env.SMTP_FROM_NAME ?? 'Flux Workflow';
 
             if (!smtpHost || !smtpUser || !smtpPass || !smtpFrom) {
@@ -563,6 +564,7 @@ export class GmailNode implements NodeExecutor {
                 from:       `"${fromName}" <${smtpFrom}>`,
                 to:         replyTo,
                 ...(replyCc ? { cc: replyCc } : {}),
+                ...(smtpReplyTo ? { replyTo: smtpReplyTo } : {}),
                 subject:    replySubject,
                 html:       htmlBody,
                 text:       rawBody,
@@ -922,6 +924,7 @@ export class GmailNode implements NodeExecutor {
             const smtpUser    = process.env.SMTP_USER;
             const smtpPass    = process.env.SMTP_PASS;
             const smtpFrom    = process.env.SMTP_FROM_ADDRESS;
+            const smtpReplyTo = process.env.SMTP_REPLY_TO?.trim() || undefined;
             const fromName    = process.env.SMTP_FROM_NAME ?? 'Flux Workflow';
 
             if (!smtpHost || !smtpUser || !smtpPass || !smtpFrom) {
@@ -959,6 +962,7 @@ export class GmailNode implements NodeExecutor {
                 to:      toAddr,
                 ...(ccAddr  ? { cc:  ccAddr  } : {}),
                 ...(bccAddr ? { bcc: bccAddr } : {}),
+                ...(smtpReplyTo ? { replyTo: smtpReplyTo } : {}),
                 subject,
                 html:    htmlBody,
                 text:    rawBody,
