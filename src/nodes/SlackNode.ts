@@ -528,6 +528,36 @@ export class SlackNode implements NodeExecutor {
                 await fetchChannelPages('private_channel', 'groups:read');
             }
 
+            // Slack's conversations.list intentionally omits num_members for
+            // private channels. For any private channel whose count is still 0
+            // or undefined, call conversations.members and count the results.
+            const privateNeedingCount = allChannels.filter(
+                (ch) => ch.isPrivate && !ch.memberCount,
+            );
+            if (privateNeedingCount.length > 0) {
+                await Promise.all(
+                    privateNeedingCount.map(async (ch) => {
+                        try {
+                            const memberIds: string[] = [];
+                            let memberCursor: string | undefined;
+                            do {
+                                const page = await client.conversations.members({
+                                    channel: ch.id,
+                                    limit:   200,
+                                    ...(memberCursor ? { cursor: memberCursor } : {}),
+                                });
+                                memberIds.push(...(page.members ?? []));
+                                memberCursor = page.response_metadata?.next_cursor || undefined;
+                            } while (memberCursor);
+                            ch.memberCount = memberIds.length;
+                        } catch {
+                            // Best-effort — leave memberCount as-is if the call fails
+                            // (e.g. bot is not a member of this private channel).
+                        }
+                    }),
+                );
+            }
+
             allChannels.sort((a, b) => {
                 if (a.isMember !== b.isMember) return a.isMember ? -1 : 1;
                 return a.name.localeCompare(b.name);
