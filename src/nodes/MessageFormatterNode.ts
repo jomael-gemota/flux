@@ -385,17 +385,36 @@ function toSlackMrkdwn(text: string): string {
     const out: string[] = [];
 
     for (const raw of lines) {
-        let l = raw;
+        let l = raw.replace(/\r$/, '');
         if (SINGLE_PH_RE.test(l.trim())) { out.push(l); continue; }
 
         l = l.replace(/^---+$/, '────────────────────────');
-        l = l.replace(/^#{1,6}\s+(.+)$/, '*$1*');
-        l = l.replace(/^[-*]\s+(.+)$/, '• $1');
 
+        // Headings (#…######) → bold. Optional trailing # marks are stripped.
+        l = l.replace(/^#{1,6}\s+(.+?)\s*#*\s*$/, '*$1*');
+
+        // Bullet lists ("- " / "* " / "+ ") → • (preserves leading indentation)
+        l = l.replace(/^(\s*)[-*+]\s+(.+)$/, '$1• $2');
+
+        // Markdown links [text](url) → Slack <url|text>
+        l = l.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<$2|$1>');
+
+        // Alternate bold syntax __text__ → *text* (handled before _italic_)
+        l = l.replace(/__(.+?)__/g, '*$1*');
+
+        // Bold/italic swap dance:
+        //   **bold**   → *bold*   (Slack bold uses single *)
+        //   *italic*   → _italic_ (Slack italic uses _)
+        // We mask ** first so the single-* italic pass does not eat them.
         const BOLD_PH = '\x00B\x00';
         l = l.replace(/\*\*(.+?)\*\*/g, `${BOLD_PH}$1${BOLD_PH}`);
         l = l.replace(/(?<!\x00)\*(?!\*)(.+?)(?<!\*)\*(?!\x00)/g, '_$1_');
         l = l.replace(new RegExp(`${BOLD_PH.replace(/\x00/g, '\\x00')}(.+?)${BOLD_PH.replace(/\x00/g, '\\x00')}`, 'g'), '*$1*');
+
+        // Strikethrough ~~text~~ → ~text~
+        l = l.replace(/~~(.+?)~~/g, '~$1~');
+
+        // Blockquote
         l = l.replace(/^>\s?(.+)$/, '>$1');
 
         out.push(l);
@@ -615,8 +634,10 @@ export class MessageFormatterNode implements NodeExecutor {
 
         // ── Step 1: Replace each {{expression}} with a unique placeholder.
         //   Objects/arrays are formatted immediately into medium-specific text.
-        //   Primitives are kept as plain strings so the markdown converter can
-        //   still process them as part of surrounding template text.
+        //   Primitive strings are ALSO converted now (Slack: mrkdwn, Teams/Gmail:
+        //   HTML, GDocs: plain) so markdown embedded inside a value — e.g. an
+        //   LLM-produced audit report — renders correctly, not as literal
+        //   characters like `**bold**` or `## heading`.
         const placeholders = new Map<string, string>();
 
         const withPlaceholders = template.replace(/\{\{\s*(.+?)\s*\}\}/g, (_match, expr) => {
@@ -639,9 +660,39 @@ export class MessageFormatterNode implements NodeExecutor {
                     }
                     placeholders.set(ph, formatted);
                 } else {
-                    // Primitive — keep as plain text so it merges with surrounding markdown
-                    const str = value === null || value === undefined ? '' : String(value);
-                    placeholders.set(ph, str);
+                    // Primitive string values (e.g. an LLM-generated markdown
+                    // report referenced via {{nodes.x.text}}) are converted
+                    // through the same medium-specific pipeline so embedded
+                    // markdown is rendered, not displayed verbatim.
+                    //
+                    // For Slack the converter is safe on single-line values
+                    // (it is a no-op when no markdown is present). For HTML
+                    // mediums we only invoke the block converter on
+                    // multi-line strings to avoid wrapping inline values
+                    // like `Hello {{name}}!` in <p>…</p>.
+                    const rawStr = value === null || value === undefined ? '' : String(value);
+                    let formattedStr: string;
+                    switch (medium) {
+                        case 'slack':
+                            formattedStr = toSlackMrkdwn(rawStr);
+                            break;
+                        case 'teams':
+                            formattedStr = rawStr.includes('\n')
+                                ? toTeamsHtml(rawStr)
+                                : teamsInlineHtml(escapeHtml(rawStr));
+                            break;
+                        case 'gmail':
+                            formattedStr = rawStr.includes('\n')
+                                ? toGmailHtml(rawStr)
+                                : inlineHtml(escapeHtml(rawStr));
+                            break;
+                        case 'gdocs':
+                            formattedStr = rawStr.includes('\n')
+                                ? toGDocsPlain(rawStr)
+                                : gdocsFormatString(rawStr);
+                            break;
+                    }
+                    placeholders.set(ph, formattedStr);
                 }
             } catch {
                 placeholders.set(ph, `[missing: ${expr.trim()}]`);
