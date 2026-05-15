@@ -1931,7 +1931,8 @@ const NODE_OUTPUT_SCHEMAS: Record<string, OutputField[]> = {
         { field: 'count',   type: 'number', description: 'Total number of iterations completed' },
     ],
     formatter: [
-        { field: 'text', type: 'string', description: 'The formatted output string' },
+        { field: 'formattedText', type: 'string', description: 'The formatted output string (mrkdwn, HTML, or plain text depending on the chosen medium)' },
+        { field: 'medium',        type: 'string', description: 'The target platform the output was formatted for (slack | teams | gmail | gdocs)' },
     ],
     output: [
         { field: 'value', type: 'any', description: 'The final output value passed to this node' },

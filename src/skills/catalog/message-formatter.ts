@@ -32,8 +32,9 @@ corresponding notification node.
 - \`gmailLayout\` (\`"table" | "text"\`): Layout style for Gmail messages.
 
 ## Output fields
-- \`text\`: Formatted output string (mrkdwn, HTML, or plain text depending on platform).
+- \`formattedText\`: Formatted output string (mrkdwn, HTML, or plain text depending on platform).
   Pass this to the downstream notification node's \`text\` or \`body\` field.
+- \`medium\`: The platform the output was formatted for (e.g. \`"slack"\`, \`"gmail"\`).
 
 ## Fluxelle workflow
 1. Use \`ask_user\` to confirm the target platform if not already known.
@@ -64,7 +65,7 @@ Then reference the output:
     "credentialId": "<resolved-from-list_credentials>",
     "action": "send_message",
     "channels": "#reports",
-    "text": "{{ nodes.formatter-1.text }}"
+    "text": "{{ nodes.formatter-1.formattedText }}"
   },
   "next": []
 }
